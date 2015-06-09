@@ -11,8 +11,7 @@
 #include "opencv2/photo/photo.hpp"
 
 
-#define ROI_FACTOR              3    // ROI of microglial cell = roi factor * mean microglial dia
-#define MIN_CELL_ARC_LENGTH     10   // Cell arc length
+#define MIN_CELL_ARC_LENGTH     5    // Cell arc length
 #define COVERAGE_RATIO          0.20 // Coverage Ratio
 
 /* Channel type */
@@ -47,7 +46,7 @@ bool enhanceImage(  cv::Mat src,
     switch (channel_type) {
         case ChannelType::DAPI: {
             // Create the mask
-            cv::threshold(*normalized, *enhanced, 120, 255, cv::THRESH_BINARY);
+            cv::threshold(*normalized, *enhanced, 70, 255, cv::THRESH_BINARY);
         } break;
 
         case ChannelType::GFP: {
@@ -250,8 +249,7 @@ void separationMetrics( std::vector<std::vector<cv::Point>> contours,
         mc[i] = cv::Point2f(static_cast<float>(mu.m10/mu.m00), 
                                             static_cast<float>(mu.m01/mu.m00));
         cv::RotatedRect min_area_rect = minAreaRect(cv::Mat(contours[i]));
-        dia[i] = (float) sqrt(pow(min_area_rect.size.width, 2) + 
-                                                pow(min_area_rect.size.height, 2));
+        dia[i] = (float) 2 * sqrt(min_area_rect.size.width * min_area_rect.size.height);
         aspect_ratio[i] = float(min_area_rect.size.width)/min_area_rect.size.height;
         if (aspect_ratio[i] > 1.0) {
             aspect_ratio[i] = 1.0/aspect_ratio[i];
@@ -438,12 +436,29 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     data_stream.close();
 
 
+    /** Display the original image */
+    cv::Mat dw_blue  = dapi_normalized;
+    cv::Mat dw_green = gfp_normalized;
+    cv::Mat dw_red   = rfp_normalized;
+
+    // Merge the modified red, blue and green layers
+    std::vector<cv::Mat> merge_normalized;
+    merge_normalized.push_back(dw_blue);
+    merge_normalized.push_back(dw_green);
+    merge_normalized.push_back(dw_red);
+    cv::Mat color_normalized;
+    cv::merge(merge_normalized, color_normalized);
+    std::string out_normalized = out_directory + analyzed_image_name;
+    out_normalized.insert(out_normalized.find_last_of("."), "_1", 2);
+    cv::imwrite(out_normalized.c_str(), color_normalized);
+
+
     /** Display the analyzed <dapi,gfp,rfp> image set **/
 
     // Initialize
-    cv::Mat drawing_blue  = dapi_normalized;
-    cv::Mat drawing_green = gfp_normalized;
-    cv::Mat drawing_red   = rfp_normalized;
+    cv::Mat drawing_blue  = dapi_enhanced;
+    cv::Mat drawing_green = gfp_enhanced;
+    cv::Mat drawing_red   = rfp_enhanced;
 
     // Draw DAPI-GFP boundaries
     for (size_t i = 0; i < dapi_gfp_contours.size(); i++) {
@@ -477,6 +492,7 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     cv::Mat color_analyzed;
     cv::merge(merge_analyzed, color_analyzed);
     std::string out_analyzed = out_directory + analyzed_image_name;
+    out_analyzed.insert(out_analyzed.find_last_of("."), "_2", 2);
     cv::imwrite(out_analyzed.c_str(), color_analyzed);
 
 
