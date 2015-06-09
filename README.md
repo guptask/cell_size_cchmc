@@ -24,8 +24,8 @@ A binary called **analyze** will be created.
 ./analyze < image directory path with / at end >
 ```
 
-+ Image directory path should have a **original** directory which contains the 
-separate tiff images for the RGB layers.
++ Image directory path should have a **jpg** directory which contains the 
+separate jpg images for the RGB layers.
 
 + **image_list.dat** has to be created inside the image directory path. This 
 tracks the different images that are being processed and allows selective 
