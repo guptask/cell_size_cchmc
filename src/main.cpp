@@ -546,24 +546,23 @@ int main(int argc, char *argv[]) {
         return -1;
     }
 
-    data_stream << "Merged Image,\
-                    Total DAPI Cell Count,\
-                    DAPI-GFP Cell Count,\
-                    DAPI-RFP Cell Count,\
-                    DAPI-Other Cell Count,\
-                    DAPI-GFP Cell Diameter (mean),\
-                    DAPI-GFP Cell Diameter (std. dev.),\
-                    DAPI-GFP Cell Aspect Ratio (mean),\
-                    DAPI-GFP Cell Aspect Ratio (std. dev.),\
-                    DAPI-RFP Cell Diameter (mean),\
-                    DAPI-RFP Cell Diameter (std. dev.),\
-                    DAPI-RFP Cell Aspect Ratio (mean),\
-                    DAPI-RFP Cell Aspect Ratio (std. dev.),\
-                    DAPI-Other Cell Diameter (mean),\
-                    DAPI-Other Cell Diameter (std. dev.),\
-                    DAPI-Other Cell Aspect Ratio (mean),\
-                    DAPI-Other Cell Aspect Ratio (std. dev.),\
-                    ";
+    data_stream << "Merged Image,";
+    data_stream << "Total DAPI Cell Count,";
+    data_stream << "DAPI-GFP Cell Count,";
+    data_stream << "DAPI-RFP Cell Count,";
+    data_stream << "DAPI-Other Cell Count,";
+    data_stream << "DAPI-GFP Cell Diameter (mean),";
+    data_stream << "DAPI-GFP Cell Diameter (std. dev.),";
+    data_stream << "DAPI-GFP Cell Aspect Ratio (mean),";
+    data_stream << "DAPI-GFP Cell Aspect Ratio (std. dev.),";
+    data_stream << "DAPI-RFP Cell Diameter (mean),";
+    data_stream << "DAPI-RFP Cell Diameter (std. dev.),";
+    data_stream << "DAPI-RFP Cell Aspect Ratio (mean),";
+    data_stream << "DAPI-RFP Cell Aspect Ratio (std. dev.),";
+    data_stream << "DAPI-Other Cell Diameter (mean),";
+    data_stream << "DAPI-Other Cell Diameter (std. dev.),";
+    data_stream << "DAPI-Other Cell Aspect Ratio (mean),";
+    data_stream << "DAPI-Other Cell Aspect Ratio (std. dev.),";
 
     data_stream << std::endl;
     data_stream.close();
