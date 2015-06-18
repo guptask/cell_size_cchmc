@@ -11,8 +11,15 @@
 #include "opencv2/photo/photo.hpp"
 
 
-#define MIN_CELL_ARC_LENGTH     5    // Cell arc length
-#define COVERAGE_RATIO          0.20 // Coverage Ratio
+#define MIN_CELL_ARC_LENGTH     5    // Min cell arc length
+#define MAX_CELL_ARC_LENGTH     140  // Max cell arc length
+#define DAPI_THRESHOLD          90   // DAPI enhancement threshold
+#define GFP_THRESHOLD           20   // GFP  enhancement threshold
+#define RFP_THRESHOLD           20   // RFP  enhancement threshold
+#define COVERAGE_RATIO          0.3  // Coverage ratio
+#define SOMA_FACTOR             1.5  // Soma radius = factor * nuclues radius
+#define DEBUG_FLAG              1    // Debug flag
+
 
 /* Channel type */
 enum class ChannelType : unsigned char {
@@ -46,23 +53,17 @@ bool enhanceImage(  cv::Mat src,
     switch (channel_type) {
         case ChannelType::DAPI: {
             // Create the mask
-            cv::threshold(*normalized, *enhanced, 70, 255, cv::THRESH_BINARY);
+            cv::threshold(*normalized, *enhanced, DAPI_THRESHOLD, 255, cv::THRESH_BINARY);
         } break;
 
         case ChannelType::GFP: {
-            // Sharpen the image
-            cv::Mat temp;
-            cv::GaussianBlur(*normalized, temp, cv::Size(0,0), 11);
-            cv::addWeighted(*normalized, 1.5, temp, -0.5, 0, *enhanced);
-            cv::threshold(*enhanced, *enhanced, 60, 255, cv::THRESH_BINARY);
+            // Create the mask
+            cv::threshold(*normalized, *enhanced, GFP_THRESHOLD, 255, cv::THRESH_BINARY);
         } break;
 
         case ChannelType::RFP: {
-            // Sharpen the image
-            cv::Mat temp;
-            cv::GaussianBlur(*normalized, temp, cv::Size(0,0), 11);
-            cv::addWeighted(*normalized, 1.5, temp, -0.5, 0, *enhanced);
-            cv::threshold(*enhanced, *enhanced, 60, 255, cv::THRESH_BINARY);
+            // Create the mask
+            cv::threshold(*normalized, *enhanced, RFP_THRESHOLD, 255, cv::THRESH_BINARY);
         } break;
 
         default: {
@@ -74,8 +75,7 @@ bool enhanceImage(  cv::Mat src,
 }
 
 /* Find the contours in the image */
-void contourCalc(cv::Mat src, ChannelType channel_type, 
-                    double min_area, cv::Mat *dst, 
+void contourCalc(cv::Mat src, double min_area, cv::Mat *dst, 
                     std::vector<std::vector<cv::Point>> *contours, 
                     std::vector<cv::Vec4i> *hierarchy, 
                     std::vector<HierarchyType> *validity_mask, 
@@ -83,15 +83,8 @@ void contourCalc(cv::Mat src, ChannelType channel_type,
 
     cv::Mat temp_src;
     src.copyTo(temp_src);
-    switch(channel_type) {
-        case ChannelType::DAPI : {
-            findContours(temp_src, *contours, *hierarchy, cv::RETR_EXTERNAL, 
-                                                        cv::CHAIN_APPROX_SIMPLE);
-        } break;
-
-        default: return;
-    }
-
+    findContours(temp_src, *contours, *hierarchy, 
+            cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
     *dst = cv::Mat::zeros(temp_src.size(), CV_8UC3);
     if (!contours->size()) return;
     validity_mask->assign(contours->size(), HierarchyType::INVALID_CNTR);
@@ -141,95 +134,88 @@ void filterCells(   std::vector<std::vector<cv::Point>> contours,
     for (size_t i = 0; i < contours.size(); i++) {
         if (contour_mask[i] != HierarchyType::PARENT_CNTR) continue;
 
-        // Eliminate small contours via contour arc calculation
-        if ((arcLength(contours[i], true) >= MIN_CELL_ARC_LENGTH) && 
-                                            (contours[i].size() >= 5)) {
+        // Eliminate small and large contours via contour arc calculation
+        auto arc_length = arcLength(contours[i], true);
+        if (    (arc_length >= MIN_CELL_ARC_LENGTH) && 
+                (contours[i].size() >= 5) ) {
             filtered_contours->push_back(contours[i]);
         }
     }
 }
 
-/* Classify cells as dapi-gfp or dapi-rfp */
-void classifyCells( std::vector<std::vector<cv::Point>> dapi_contours, 
-                    cv::Mat dapi_gfp_intersection, 
-                    cv::Mat dapi_rfp_intersection, 
-                    std::vector<std::vector<cv::Point>> *dapi_gfp_contours,
-                    std::vector<std::vector<cv::Point>> *dapi_rfp_contours,
-                    std::vector<std::vector<cv::Point>> *dapi_other_contours    ) {
+/* Find cell soma */
+bool findCellSoma( std::vector<cv::Point> nucleus_contour, 
+                   cv::Mat cell_mask, 
+                   std::vector<cv::Point> *soma_contour ) {
 
-    for (size_t i = 0; i < dapi_contours.size(); i++) {
+    bool status = false;
 
-        std::vector<std::vector<cv::Point>> specific_contour (1, dapi_contours[i]);
+    // Calculate radius and center of the nucleus
+    cv::Moments mu = moments(nucleus_contour, true);
+    cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
+                                    static_cast<float>(mu.m01/mu.m00)   );
+    cv::RotatedRect min_area_rect = minAreaRect(cv::Mat(nucleus_contour));
+    float radius = (float) sqrt(min_area_rect.size.width * min_area_rect.size.height);
 
-        // Determine dapi-gfp score
-        cv::Mat drawing_gfp = cv::Mat::zeros(dapi_gfp_intersection.size(), CV_8UC1);
-        drawContours(   drawing_gfp, 
-                        specific_contour, 
-                        -1, 
-                        cv::Scalar::all(255), 
-                        cv::FILLED, 
-                        cv::LINE_8, 
-                        std::vector<cv::Vec4i>(), 
-                        0, 
-                        cv::Point()
-                    );
-        int dapi_non_zero_score = countNonZero(drawing_gfp);
-        assert(dapi_non_zero_score);
+    // Nucleus' region of influence
+    cv::Mat roi_mask = cv::Mat::zeros(cell_mask.size(), CV_8UC1);
+    float roi_radius = ((float) SOMA_FACTOR) * radius;
+    cv::circle(roi_mask, mc, roi_radius, 255, -1, 8);
+    std::vector<std::vector<cv::Point>> specific_contour (1, nucleus_contour);
+    drawContours(   roi_mask, 
+                    specific_contour, 
+                    -1, 
+                    cv::Scalar::all(0), 
+                    cv::FILLED, 
+                    cv::LINE_8, 
+                    std::vector<cv::Vec4i>(), 
+                    0, 
+                    cv::Point()
+                );
+    int circle_score = countNonZero(roi_mask);
 
-        cv::Mat gfp_mask;
-        bitwise_and(drawing_gfp, dapi_gfp_intersection, gfp_mask);
-        int dapi_gfp_non_zero_score = countNonZero(gfp_mask);
-        float dapi_gfp_coverage_ratio = 
-                ((float)dapi_gfp_non_zero_score)/dapi_non_zero_score;
+    // Soma present in ROI
+    cv::Mat intersection;
+    bitwise_and(roi_mask, cell_mask, intersection);
+    int intersection_score = countNonZero(intersection);
 
-        // Determine dapi-rfp score
-        cv::Mat drawing_rfp = cv::Mat::zeros(dapi_rfp_intersection.size(), CV_8UC1);
-        drawContours(   drawing_rfp, 
-                        specific_contour, 
-                        -1, 
-                        cv::Scalar::all(255), 
-                        cv::FILLED, 
-                        cv::LINE_8, 
-                        std::vector<cv::Vec4i>(), 
-                        0, 
-                        cv::Point()
-                    );
+    // Add to the soma mask if coverage area exceeds a certain threshold
+    float ratio = ((float) intersection_score) / circle_score;
+    if (ratio >= COVERAGE_RATIO) {
 
-        cv::Mat rfp_mask;
-        bitwise_and(drawing_rfp, dapi_rfp_intersection, rfp_mask);
-        int dapi_rfp_non_zero_score = countNonZero(rfp_mask);
-        float dapi_rfp_coverage_ratio = 
-                ((float)dapi_rfp_non_zero_score)/dapi_non_zero_score;
+        // Segment
+        cv::Mat soma_segmented;
+        std::vector<std::vector<cv::Point>> contours_soma;
+        std::vector<cv::Vec4i> hierarchy_soma;
+        std::vector<HierarchyType> soma_contour_mask;
+        std::vector<double> soma_contour_area;
+        contourCalc(    intersection, 
+                        1.0, 
+                        &soma_segmented, 
+                        &contours_soma, 
+                        &hierarchy_soma, 
+                        &soma_contour_mask, 
+                        &soma_contour_area
+                   );
 
-        // Classify
-        bool dapi_gfp_status = 
-                (dapi_gfp_coverage_ratio > COVERAGE_RATIO) ? true : false;
+        size_t max_index = 0;
+        double max_area  = 0.0;
+        for (size_t i = 0; i < contours_soma.size(); i++) {
+            if (soma_contour_mask[i] != HierarchyType::PARENT_CNTR) continue;
+            if (contours_soma[i].size() < 5) continue;
+            auto arc_length = arcLength(contours_soma[i], true);
+            if (arc_length >= MAX_CELL_ARC_LENGTH) continue;
 
-        bool dapi_rfp_status = 
-                (dapi_rfp_coverage_ratio > COVERAGE_RATIO) ? true : false;
-
-        if (!dapi_gfp_status && !dapi_rfp_status) {
-            dapi_other_contours->push_back(dapi_contours[i]);
-
-        } else if (dapi_gfp_status && !dapi_rfp_status) {
-            dapi_gfp_contours->push_back(dapi_contours[i]);
-
-        } else if (!dapi_gfp_status && dapi_rfp_status) {
-            dapi_rfp_contours->push_back(dapi_contours[i]);
-
-        } else {
-            if (dapi_gfp_coverage_ratio > dapi_rfp_coverage_ratio) {
-                dapi_gfp_contours->push_back(dapi_contours[i]);
-
-            } else if (dapi_gfp_coverage_ratio == dapi_rfp_coverage_ratio) {
-                // may be assigned a separate class
-                dapi_gfp_contours->push_back(dapi_contours[i]);
-
-            } else {
-                dapi_rfp_contours->push_back(dapi_contours[i]);
+            // Find the largest permissible contour
+            if (soma_contour_area[i] > max_area) {
+                max_area = soma_contour_area[i];
+                max_index = i;
+                status = true;
             }
         }
+        *soma_contour = contours_soma[max_index];
     }
+    return status;
 }
 
 /* Separation metrics */
@@ -335,13 +321,13 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     std::vector<cv::Vec4i> hierarchy_dapi;
     std::vector<HierarchyType> dapi_contour_mask;
     std::vector<double> dapi_contour_area;
-    contourCalc(dapi_enhanced, ChannelType::DAPI, 1.0, &dapi_segmented, 
-        &contours_dapi, &hierarchy_dapi, &dapi_contour_mask, &dapi_contour_area);
+    contourCalc(dapi_enhanced, 1.0, &dapi_segmented, &contours_dapi, 
+                &hierarchy_dapi, &dapi_contour_mask, &dapi_contour_area);
 
-    // Filter the dapi contours
+    // Filter the gfp contours
     std::vector<std::vector<cv::Point>> contours_dapi_filtered;
     filterCells(contours_dapi, dapi_contour_mask, &contours_dapi_filtered);
-    data_stream << contours_dapi_filtered.size() << ","; 
+
 
     /* GFP image */
     // Enhance
@@ -353,10 +339,6 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         return false;
     }
 
-    // DAPI-GFP channel intersection
-    cv::Mat dapi_gfp_intersection;
-    bitwise_and(dapi_enhanced, gfp_enhanced, dapi_gfp_intersection);
-
     /* RFP image */
     // Enhance
     cv::Mat rfp_normalized, rfp_enhanced;
@@ -367,28 +349,26 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         return false;
     }
 
-    // DAPI-RFP channel intersection
-    cv::Mat dapi_rfp_intersection;
-    bitwise_and(dapi_enhanced, rfp_enhanced, dapi_rfp_intersection);
-
 
     /** Collect the metrics **/
 
-    // Classify DAPI as DAPI-GFP, DAPI-RFP or DAPI-Other
-    std::vector<std::vector<cv::Point>> dapi_gfp_contours, 
-                                        dapi_rfp_contours, 
-                                        dapi_other_contours;
-    classifyCells(  contours_dapi_filtered, 
-                    dapi_gfp_intersection, 
-                    dapi_rfp_intersection, 
-                    &dapi_gfp_contours, 
-                    &dapi_rfp_contours,
-                    &dapi_other_contours
-                 );
-    data_stream << dapi_gfp_contours.size() << "," 
-                << dapi_rfp_contours.size() << ","
-                << dapi_other_contours.size() << ",";
+    std::vector<std::vector<cv::Point>> contours_gfp, contours_rfp;
+    for (size_t i = 0; i < contours_dapi_filtered.size(); i++) {
 
+        // Find DAPI-GFP Cell Soma
+        std::vector<cv::Point> gfp_contour;
+        if (findCellSoma( contours_dapi_filtered[i], gfp_enhanced, &gfp_contour )) {
+            contours_gfp.push_back(gfp_contour);
+        }
+
+        // Find DAPI-RFP Cell Soma
+        std::vector<cv::Point> rfp_contour;
+        if (findCellSoma( contours_dapi_filtered[i], rfp_enhanced, &rfp_contour )) {
+            contours_rfp.push_back(rfp_contour);
+        }
+    }
+
+#if 0
     // Separation metrics for dapi-gfp cells
     float mean_dia = 0.0, stddev_dia = 0.0;
     float mean_aspect_ratio = 0.0, stddev_aspect_ratio = 0.0;
@@ -396,7 +376,24 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                         &mean_dia, 
                         &stddev_dia, 
                         &mean_aspect_ratio, 
-                        &stddev_aspect_ratio    );
+                        &stddev_aspect_ratio
+                     );
+    data_stream << mean_dia << "," 
+                << stddev_dia << "," 
+                << mean_aspect_ratio << "," 
+                << stddev_aspect_ratio << ",";
+
+    // Separation metrics for other-gfp cells
+    mean_dia = 0.0;
+    stddev_dia = 0.0;
+    mean_aspect_ratio = 0.0;
+    stddev_aspect_ratio = 0.0;
+    separationMetrics(  other_gfp_contours, 
+                        &mean_dia, 
+                        &stddev_dia, 
+                        &mean_aspect_ratio, 
+                        &stddev_aspect_ratio
+                     );
     data_stream << mean_dia << "," 
                 << stddev_dia << "," 
                 << mean_aspect_ratio << "," 
@@ -411,77 +408,78 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                         &mean_dia, 
                         &stddev_dia, 
                         &mean_aspect_ratio, 
-                        &stddev_aspect_ratio    );
+                        &stddev_aspect_ratio
+                     );
     data_stream << mean_dia << "," 
                 << stddev_dia << "," 
                 << mean_aspect_ratio << "," 
                 << stddev_aspect_ratio << ",";
 
-    // Separation metrics for dapi-other cells
+    // Separation metrics for other-rfp cells
     mean_dia = 0.0;
     stddev_dia = 0.0;
     mean_aspect_ratio = 0.0;
     stddev_aspect_ratio = 0.0;
-    separationMetrics(  dapi_other_contours, 
+    separationMetrics(  other_rfp_contours, 
                         &mean_dia, 
                         &stddev_dia, 
                         &mean_aspect_ratio, 
-                        &stddev_aspect_ratio    );
+                        &stddev_aspect_ratio
+                     );
     data_stream << mean_dia << "," 
                 << stddev_dia << "," 
                 << mean_aspect_ratio << "," 
                 << stddev_aspect_ratio << ",";
+#endif
 
     data_stream << std::endl;
     data_stream.close();
 
 
-    /** Display the original image */
-    cv::Mat dw_blue  = dapi_normalized;
-    cv::Mat dw_green = gfp_normalized;
-    cv::Mat dw_red   = rfp_normalized;
+    /** Display the debug image **/
 
-    // Merge the modified red, blue and green layers
-    std::vector<cv::Mat> merge_normalized;
-    merge_normalized.push_back(dw_blue);
-    merge_normalized.push_back(dw_green);
-    merge_normalized.push_back(dw_red);
-    cv::Mat color_normalized;
-    cv::merge(merge_normalized, color_normalized);
-    std::string out_normalized = out_directory + analyzed_image_name;
-    out_normalized.insert(out_normalized.find_last_of("."), "_1", 2);
-    cv::imwrite(out_normalized.c_str(), color_normalized);
+    if (DEBUG_FLAG) {
+        // Initialize
+        cv::Mat drawing_blue_debug  = dapi_enhanced;
+        cv::Mat drawing_green_debug = gfp_enhanced;
+        cv::Mat drawing_red_debug   = rfp_enhanced;
+
+        // Merge the modified red, blue and green layers
+        std::vector<cv::Mat> merge_debug;
+        merge_debug.push_back(drawing_blue_debug);
+        merge_debug.push_back(drawing_green_debug);
+        merge_debug.push_back(drawing_red_debug);
+        cv::Mat color_debug;
+        cv::merge(merge_debug, color_debug);
+
+        // Draw the debug image
+        std::string out_debug = out_directory + analyzed_image_name;
+        out_debug.insert(out_debug.find_last_of("."), "_debug", 6);
+        cv::imwrite(out_debug.c_str(), color_debug);
+    }
 
 
     /** Display the analyzed <dapi,gfp,rfp> image set **/
 
     // Initialize
-    cv::Mat drawing_blue  = dapi_enhanced;
-    cv::Mat drawing_green = gfp_enhanced;
-    cv::Mat drawing_red   = rfp_enhanced;
+    cv::Mat drawing_blue  = dapi_normalized;
+    cv::Mat drawing_green = gfp_normalized;
+    cv::Mat drawing_red   = rfp_normalized;
 
-    // Draw DAPI-GFP boundaries
-    for (size_t i = 0; i < dapi_gfp_contours.size(); i++) {
-        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(dapi_gfp_contours[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 4, 8);
-        ellipse(drawing_green, min_ellipse, 255, 4, 8);
-        ellipse(drawing_red, min_ellipse, 255, 4, 8);
+    // Draw GFP bondaries
+    for (size_t i = 0; i < contours_gfp.size(); i++) {
+        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_gfp[i]));
+        ellipse(drawing_blue, min_ellipse, 255, 2, 8);
+        ellipse(drawing_green, min_ellipse, 255, 2, 8);
+        ellipse(drawing_red, min_ellipse, 0, 2, 8);
     }
 
-    // Draw DAPI-RFP boundaries
-    for (size_t i = 0; i < dapi_rfp_contours.size(); i++) {
-        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(dapi_rfp_contours[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 4, 8);
-        ellipse(drawing_green, min_ellipse, 255, 4, 8);
-        ellipse(drawing_red, min_ellipse, 255, 4, 8);
-    }
-
-    // Draw DAPI-Other boundaries
-    for (size_t i = 0; i < dapi_other_contours.size(); i++) {
-        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(dapi_other_contours[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 4, 8);
-        ellipse(drawing_green, min_ellipse, 255, 4, 8);
-        ellipse(drawing_red, min_ellipse, 255, 4, 8);
+    // Draw RFP bondaries
+    for (size_t i = 0; i < contours_rfp.size(); i++) {
+        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_rfp[i]));
+        ellipse(drawing_blue, min_ellipse, 255, 2, 8);
+        ellipse(drawing_green, min_ellipse, 0, 2, 8);
+        ellipse(drawing_red, min_ellipse, 255, 2, 8);
     }
 
     // Merge the modified red, blue and green layers
@@ -491,8 +489,9 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     merge_analyzed.push_back(drawing_red);
     cv::Mat color_analyzed;
     cv::merge(merge_analyzed, color_analyzed);
+
+    // Draw the analyzed image
     std::string out_analyzed = out_directory + analyzed_image_name;
-    out_analyzed.insert(out_analyzed.find_last_of("."), "_2", 2);
     cv::imwrite(out_analyzed.c_str(), color_analyzed);
 
 
@@ -547,22 +546,26 @@ int main(int argc, char *argv[]) {
     }
 
     data_stream << "Merged Image,";
-    data_stream << "Total DAPI Cell Count,";
     data_stream << "DAPI-GFP Cell Count,";
+    data_stream << "Other-GFP Cell Count,";
     data_stream << "DAPI-RFP Cell Count,";
-    data_stream << "DAPI-Other Cell Count,";
+    data_stream << "Other-RFP Cell Count,";
     data_stream << "DAPI-GFP Cell Diameter (mean),";
     data_stream << "DAPI-GFP Cell Diameter (std. dev.),";
     data_stream << "DAPI-GFP Cell Aspect Ratio (mean),";
     data_stream << "DAPI-GFP Cell Aspect Ratio (std. dev.),";
+    data_stream << "Other-GFP Cell Diameter (mean),";
+    data_stream << "Other-GFP Cell Diameter (std. dev.),";
+    data_stream << "Other-GFP Cell Aspect Ratio (mean),";
+    data_stream << "Other-GFP Cell Aspect Ratio (std. dev.),";
     data_stream << "DAPI-RFP Cell Diameter (mean),";
     data_stream << "DAPI-RFP Cell Diameter (std. dev.),";
     data_stream << "DAPI-RFP Cell Aspect Ratio (mean),";
     data_stream << "DAPI-RFP Cell Aspect Ratio (std. dev.),";
-    data_stream << "DAPI-Other Cell Diameter (mean),";
-    data_stream << "DAPI-Other Cell Diameter (std. dev.),";
-    data_stream << "DAPI-Other Cell Aspect Ratio (mean),";
-    data_stream << "DAPI-Other Cell Aspect Ratio (std. dev.),";
+    data_stream << "Other-RFP Cell Diameter (mean),";
+    data_stream << "Other-RFP Cell Diameter (std. dev.),";
+    data_stream << "Other-RFP Cell Aspect Ratio (mean),";
+    data_stream << "Other-RFP Cell Aspect Ratio (std. dev.),";
 
     data_stream << std::endl;
     data_stream.close();
