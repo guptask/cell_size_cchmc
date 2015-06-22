@@ -493,9 +493,9 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         //ellipse(drawing_blue, min_ellipse, 255, 1, 8);
         //ellipse(drawing_green, min_ellipse, 0, 1, 8);
         //ellipse(drawing_red, min_ellipse, 255, 1, 8);
-        drawContours(drawing_blue, contours_gfp, i, 255, 1, 8);
-        drawContours(drawing_green, contours_gfp, i, 0, 1, 8);
-        drawContours(drawing_red, contours_gfp, i, 255, 1, 8);
+        drawContours(drawing_blue, contours_rfp, i, 255, 1, 8);
+        drawContours(drawing_green, contours_rfp, i, 0, 1, 8);
+        drawContours(drawing_red, contours_rfp, i, 255, 1, 8);
     }
 
     // Merge the modified red, blue and green layers
