@@ -19,7 +19,7 @@
 #define RFP_THRESHOLD           25   // RFP  enhancement threshold
 #define COVERAGE_RATIO          0.5  // Coverage ratio
 #define SOMA_FACTOR             1.5  // Soma radius = factor * nuclues radius
-#define DEBUG_FLAG              1    // Debug flag
+#define DEBUG_FLAG              0    // Debug flag
 
 
 /* Channel type */
@@ -157,7 +157,7 @@ void filterCells(   cv::Mat channel,
         // Eliminate extremely small contours
         auto arc_length = arcLength(contours[i], true);
         if ((contours[i].size() >= 5) && (arc_length <= MAX_ARC_LENGTH_FILTER)) {
-    
+
             // Calculate center of the nucleus
             cv::Moments mu = moments(contours[i], true);
             cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
