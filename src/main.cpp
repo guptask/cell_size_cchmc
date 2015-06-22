@@ -17,8 +17,8 @@
 #define MAX_ARC_LENGTH_FILTER   600  // Max arc length filter threshold
 #define GFP_THRESHOLD           25   // GFP  enhancement threshold
 #define RFP_THRESHOLD           25   // RFP  enhancement threshold
-#define COVERAGE_RATIO          0.6  // Coverage ratio
-#define SOMA_FACTOR             1.3  // Soma radius = factor * nuclues radius
+#define COVERAGE_RATIO          0.5  // Coverage ratio
+#define SOMA_FACTOR             1.5  // Soma radius = factor * nuclues radius
 #define DEBUG_FLAG              1    // Debug flag
 
 
@@ -188,33 +188,19 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
     cv::Moments mu = moments(nucleus_contour, true);
     cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
                                     static_cast<float>(mu.m01/mu.m00)   );
-    //cv::RotatedRect min_area_rect = minAreaRect(cv::Mat(nucleus_contour));
-    //float radius = (float) sqrt(min_area_rect.size.width * min_area_rect.size.height);
-
     // Nucleus' region of influence
     cv::Mat roi_mask = cv::Mat::zeros(cell_mask.size(), CV_8UC1);
-    //float roi_radius = (float) (SOMA_FACTOR * radius);
     float roi_radius = (float) (SOMA_FACTOR * DAPI_MASK_RADIUS);
     cv::circle(roi_mask, mc, roi_radius, 255, -1, 8);
     cv::circle(roi_mask, mc, DAPI_MASK_RADIUS, 0, -1, 8);
-#if 0
-    std::vector<std::vector<cv::Point>> specific_contour (1, nucleus_contour);
-    drawContours(   roi_mask, 
-                    specific_contour, 
-                    -1, 
-                    cv::Scalar::all(0), 
-                    cv::FILLED, 
-                    cv::LINE_8, 
-                    std::vector<cv::Vec4i>(), 
-                    0, 
-                    cv::Point()
-                );
-#endif
     int circle_score = countNonZero(roi_mask);
 
     // Soma present in ROI
     bitwise_and(roi_mask, cell_mask, *intersection);
     int intersection_score = countNonZero(*intersection);
+
+    // Add the dapi contour to intersection region
+    cv::circle(*intersection, mc, DAPI_MASK_RADIUS, 255, -1, 8);
 
     // Add to the soma mask if coverage area exceeds a certain threshold
     float ratio = ((float) intersection_score) / circle_score;
@@ -492,10 +478,13 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
 
     // Draw GFP bondaries
     for (size_t i = 0; i < contours_gfp.size(); i++) {
-        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_gfp[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 1, 8);
-        ellipse(drawing_green, min_ellipse, 255, 1, 8);
-        ellipse(drawing_red, min_ellipse, 0, 1, 8);
+        //cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_gfp[i]));
+        //ellipse(drawing_blue, min_ellipse, 255, 1, 8);
+        //ellipse(drawing_green, min_ellipse, 255, 1, 8);
+        //ellipse(drawing_red, min_ellipse, 0, 1, 8);
+        drawContours(drawing_blue, contours_gfp, i, 255, 1, 8);
+        drawContours(drawing_green, contours_gfp, i, 255, 1, 8);
+        drawContours(drawing_red, contours_gfp, i, 0, 1, 8);
     }
 
     // Draw RFP bondaries
