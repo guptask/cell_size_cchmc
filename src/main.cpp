@@ -11,10 +11,12 @@
 #include "opencv2/photo/photo.hpp"
 
 
+#define MAX_SOMA_SIZE           500  // Max soma size
+#define MIN_SOMA_SIZE           30   // Min soma size
 #define MAX_ARC_LENGTH_FILTER   500  // Max arc length filter threshold
 #define GFP_THRESHOLD           30   // GFP  enhancement threshold
 #define RFP_THRESHOLD           30   // RFP  enhancement threshold
-#define COVERAGE_RATIO          0.1  // Coverage ratio
+#define COVERAGE_RATIO          0.2  // Coverage ratio
 #define SOMA_FACTOR             1.4  // Soma radius = factor * nuclues radius
 #define DEBUG_FLAG              1    // Debug flag
 
@@ -51,19 +53,25 @@ bool enhanceImage(  cv::Mat src,
     switch (channel_type) {
         case ChannelType::DAPI: {
             // Create the mask
-            cv::Mat temp1;
-            cv::threshold(*normalized, temp1, 90, 255, cv::THRESH_BINARY);
-            cv::Mat temp2;
+            cv::Mat temp1, temp2, temp3, temp4;
+            // First threshold >= 85
+            cv::threshold(*normalized, temp1, 85, 255, cv::THRESH_BINARY);
+            // Second threshold >= 60, <= 70
             cv::threshold(*normalized, temp2, 70, 255, cv::THRESH_TOZERO_INV);
-            cv::Mat temp3;
-            cv::threshold(temp2, temp3, 50, 255, cv::THRESH_BINARY);
-            cv::Mat temp4;
-            cv::threshold(*normalized, temp4, 40, 255, cv::THRESH_TOZERO_INV);
-            cv::Mat temp5;
-            cv::threshold(temp4, temp5, 30, 255, cv::THRESH_BINARY);
-            cv::Mat temp6;
-            bitwise_or(temp1, temp3, temp6);
-            bitwise_or(temp5, temp6, *enhanced);
+            cv::threshold(temp2, temp2, 60, 255, cv::THRESH_BINARY);
+            // Third threshold >= 50, <= 45
+            cv::threshold(*normalized, temp3, 50, 255, cv::THRESH_TOZERO_INV);
+            cv::threshold(temp3, temp3, 45, 255, cv::THRESH_BINARY);
+            // Fourth threshold >= 30, <= 25
+            cv::threshold(*normalized, temp4, 30, 255, cv::THRESH_TOZERO_INV);
+            cv::threshold(temp4, temp4, 25, 255, cv::THRESH_BINARY);
+
+            // Merge the different thresholds
+            cv::Mat tempor1, tempor2, tempor3;
+            bitwise_or(temp1, temp2, tempor1);
+            bitwise_or(tempor1, temp3, tempor2);
+            bitwise_or(tempor2, temp4, tempor3);
+            *enhanced = tempor3;
         } break;
 
         case ChannelType::GFP: {
@@ -179,7 +187,7 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
                     cv::FILLED, 
                     cv::LINE_8, 
                     std::vector<cv::Vec4i>(), 
-                    255, 
+                    0, 
                     cv::Point()
                 );
     int circle_score = countNonZero(roi_mask);
@@ -211,8 +219,10 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
         for (size_t i = 0; i < contours_soma.size(); i++) {
             if (soma_contour_mask[i] != HierarchyType::PARENT_CNTR) continue;
             if (contours_soma[i].size() < 5) continue;
-            if ((soma_contour_area[i] < 5) || (soma_contour_area[i] > 500)) continue;
-
+            if (    (soma_contour_area[i] < MIN_SOMA_SIZE) || 
+                    (soma_contour_area[i] > MAX_SOMA_SIZE)      ) {
+                continue;
+            }
             // Find the largest permissible contour
             if (soma_contour_area[i] > max_area) {
                 max_area = soma_contour_area[i];
@@ -466,17 +476,17 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     // Draw GFP bondaries
     for (size_t i = 0; i < contours_gfp.size(); i++) {
         cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_gfp[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 2, 8);
-        ellipse(drawing_green, min_ellipse, 255, 2, 8);
-        ellipse(drawing_red, min_ellipse, 0, 2, 8);
+        ellipse(drawing_blue, min_ellipse, 255, 1, 8);
+        ellipse(drawing_green, min_ellipse, 255, 1, 8);
+        ellipse(drawing_red, min_ellipse, 0, 1, 8);
     }
 
     // Draw RFP bondaries
     for (size_t i = 0; i < contours_rfp.size(); i++) {
         cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_rfp[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 2, 8);
-        ellipse(drawing_green, min_ellipse, 0, 2, 8);
-        ellipse(drawing_red, min_ellipse, 255, 2, 8);
+        ellipse(drawing_blue, min_ellipse, 255, 1, 8);
+        ellipse(drawing_green, min_ellipse, 0, 1, 8);
+        ellipse(drawing_red, min_ellipse, 255, 1, 8);
     }
 
     // Draw DAPI bondaries
