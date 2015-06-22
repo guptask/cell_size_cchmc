@@ -383,6 +383,9 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         if (findCellSoma( contours_dapi_filtered[i], gfp_enhanced, &temp, &gfp_contour )) {
             contours_gfp.push_back(gfp_contour);
             bitwise_or(gfp_intersection, temp, gfp_intersection);
+            cv::Mat temp_not;
+            bitwise_not(temp, temp_not);
+            bitwise_and(gfp_enhanced, temp_not, gfp_enhanced);
         }
 
         // Find DAPI-RFP Cell Soma
@@ -390,6 +393,9 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         if (findCellSoma( contours_dapi_filtered[i], rfp_enhanced, &temp, &rfp_contour )) {
             contours_rfp.push_back(rfp_contour);
             bitwise_or(rfp_intersection, temp, rfp_intersection);
+            cv::Mat temp_not;
+            bitwise_not(temp, temp_not);
+            bitwise_and(rfp_enhanced, temp_not, rfp_enhanced);
         }
     }
 
