@@ -495,21 +495,6 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         ellipse(drawing_red, min_ellipse, 255, 1, 8);
     }
 
-    // Draw DAPI bondaries
-    for (size_t i = 0; i < contours_dapi_filtered.size(); i++) {
-        //drawContours(drawing_blue, contours_dapi_filtered, i, 255, 1, 8);
-        //drawContours(drawing_green, contours_dapi_filtered, i, 255, 1, 8);
-        //drawContours(drawing_red, contours_dapi_filtered, i, 255, 1, 8);
-#if 0
-        cv::Moments mu = moments(contours_dapi_filtered[i], true);
-        cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
-                                        static_cast<float>(mu.m01/mu.m00)   );
-        cv::circle(drawing_blue, mc, DAPI_MASK_RADIUS, 255, 1, 8);
-        cv::circle(drawing_green, mc, DAPI_MASK_RADIUS, 255, 1, 8);
-        cv::circle(drawing_red, mc, DAPI_MASK_RADIUS, 255, 1, 8);
-#endif
-    }
-
     // Merge the modified red, blue and green layers
     std::vector<cv::Mat> merge_analyzed;
     merge_analyzed.push_back(drawing_blue);
