@@ -11,13 +11,14 @@
 #include "opencv2/photo/photo.hpp"
 
 
-#define MAX_SOMA_SIZE           500  // Max soma size
-#define MIN_SOMA_SIZE           30   // Min soma size
-#define MAX_ARC_LENGTH_FILTER   500  // Max arc length filter threshold
-#define GFP_THRESHOLD           30   // GFP  enhancement threshold
-#define RFP_THRESHOLD           30   // RFP  enhancement threshold
-#define COVERAGE_RATIO          0.2  // Coverage ratio
-#define SOMA_FACTOR             1.4  // Soma radius = factor * nuclues radius
+#define DAPI_MASK_RADIUS        12   // Dapi mask radius
+#define DAPI_COVERAGE_RATIO     0.8  // Dapi coverage ratio
+#define MIN_SOMA_SIZE           20   // Min soma size
+#define MAX_ARC_LENGTH_FILTER   600  // Max arc length filter threshold
+#define GFP_THRESHOLD           25   // GFP  enhancement threshold
+#define RFP_THRESHOLD           25   // RFP  enhancement threshold
+#define COVERAGE_RATIO          0.6  // Coverage ratio
+#define SOMA_FACTOR             1.3  // Soma radius = factor * nuclues radius
 #define DEBUG_FLAG              1    // Debug flag
 
 
@@ -145,7 +146,8 @@ void contourCalc(cv::Mat src, double min_area, cv::Mat *dst,
 }
 
 /* Filter out ill-formed or small cells */
-void filterCells(   std::vector<std::vector<cv::Point>> contours,
+void filterCells(   cv::Mat channel,
+                    std::vector<std::vector<cv::Point>> contours,
                     std::vector<HierarchyType> contour_mask,
                     std::vector<std::vector<cv::Point>> *filtered_contours ) {
 
@@ -155,7 +157,21 @@ void filterCells(   std::vector<std::vector<cv::Point>> contours,
         // Eliminate extremely small contours
         auto arc_length = arcLength(contours[i], true);
         if ((contours[i].size() >= 5) && (arc_length <= MAX_ARC_LENGTH_FILTER)) {
-            filtered_contours->push_back(contours[i]);
+    
+            // Calculate center of the nucleus
+            cv::Moments mu = moments(contours[i], true);
+            cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
+                                            static_cast<float>(mu.m01/mu.m00)   );
+            cv::Mat circle_mask = cv::Mat::zeros(channel.size(), CV_8UC1);
+            cv::circle(circle_mask, mc, DAPI_MASK_RADIUS, 255, -1, 8);
+            int circle_score = countNonZero(circle_mask);
+            cv::Mat intersection;
+            bitwise_or(circle_mask, channel, intersection);
+            int intersection_score = countNonZero(intersection);
+
+            // Add to the filter dapi list if coverage area exceeds a certain threshold
+            float ratio = ((float) intersection_score) / circle_score;
+            if (ratio >= DAPI_COVERAGE_RATIO) filtered_contours->push_back(contours[i]);
         }
     }
 }
@@ -172,13 +188,16 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
     cv::Moments mu = moments(nucleus_contour, true);
     cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
                                     static_cast<float>(mu.m01/mu.m00)   );
-    cv::RotatedRect min_area_rect = minAreaRect(cv::Mat(nucleus_contour));
-    float radius = (float) sqrt(min_area_rect.size.width * min_area_rect.size.height);
+    //cv::RotatedRect min_area_rect = minAreaRect(cv::Mat(nucleus_contour));
+    //float radius = (float) sqrt(min_area_rect.size.width * min_area_rect.size.height);
 
     // Nucleus' region of influence
     cv::Mat roi_mask = cv::Mat::zeros(cell_mask.size(), CV_8UC1);
-    float roi_radius = (float) (SOMA_FACTOR * radius);
+    //float roi_radius = (float) (SOMA_FACTOR * radius);
+    float roi_radius = (float) (SOMA_FACTOR * DAPI_MASK_RADIUS);
     cv::circle(roi_mask, mc, roi_radius, 255, -1, 8);
+    cv::circle(roi_mask, mc, DAPI_MASK_RADIUS, 0, -1, 8);
+#if 0
     std::vector<std::vector<cv::Point>> specific_contour (1, nucleus_contour);
     drawContours(   roi_mask, 
                     specific_contour, 
@@ -190,6 +209,7 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
                     0, 
                     cv::Point()
                 );
+#endif
     int circle_score = countNonZero(roi_mask);
 
     // Soma present in ROI
@@ -219,10 +239,8 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
         for (size_t i = 0; i < contours_soma.size(); i++) {
             if (soma_contour_mask[i] != HierarchyType::PARENT_CNTR) continue;
             if (contours_soma[i].size() < 5) continue;
-            if (    (soma_contour_area[i] < MIN_SOMA_SIZE) || 
-                    (soma_contour_area[i] > MAX_SOMA_SIZE)      ) {
-                continue;
-            }
+            if (soma_contour_area[i] < MIN_SOMA_SIZE) continue;
+
             // Find the largest permissible contour
             if (soma_contour_area[i] > max_area) {
                 max_area = soma_contour_area[i];
@@ -342,7 +360,7 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
 
     // Filter the gfp contours
     std::vector<std::vector<cv::Point>> contours_dapi_filtered;
-    filterCells(contours_dapi, dapi_contour_mask, &contours_dapi_filtered);
+    filterCells(dapi_enhanced, contours_dapi, dapi_contour_mask, &contours_dapi_filtered);
 
 
     /* GFP image */
@@ -442,13 +460,12 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
 
         // Draw DAPI bondaries
         for (size_t i = 0; i < contours_dapi_filtered.size(); i++) {
-            //cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_dapi_filtered[i]));
-            //ellipse(drawing_blue_debug, min_ellipse, 255, 2, 8);
-            //ellipse(drawing_green_debug, min_ellipse, 255, 2, 8);
-            //ellipse(drawing_red_debug, min_ellipse, 255, 2, 8);
-            drawContours(drawing_blue_debug, contours_dapi_filtered, i, 255, 2, 8);
-            drawContours(drawing_green_debug, contours_dapi_filtered, i, 255, 2, 8);
-            drawContours(drawing_red_debug, contours_dapi_filtered, i, 255, 2, 8);
+            cv::Moments mu = moments(contours_dapi_filtered[i], true);
+            cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
+                                            static_cast<float>(mu.m01/mu.m00)   );
+            cv::circle(drawing_blue_debug, mc, DAPI_MASK_RADIUS, 255, 1, 8);
+            cv::circle(drawing_green_debug, mc, DAPI_MASK_RADIUS, 255, 1, 8);
+            cv::circle(drawing_red_debug, mc, DAPI_MASK_RADIUS, 255, 1, 8);
         }
 
         // Merge the modified red, blue and green layers
@@ -491,9 +508,17 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
 
     // Draw DAPI bondaries
     for (size_t i = 0; i < contours_dapi_filtered.size(); i++) {
-        drawContours(drawing_blue, contours_dapi_filtered, i, 255, 1, 8);
-        drawContours(drawing_green, contours_dapi_filtered, i, 255, 1, 8);
-        drawContours(drawing_red, contours_dapi_filtered, i, 255, 1, 8);
+        //drawContours(drawing_blue, contours_dapi_filtered, i, 255, 1, 8);
+        //drawContours(drawing_green, contours_dapi_filtered, i, 255, 1, 8);
+        //drawContours(drawing_red, contours_dapi_filtered, i, 255, 1, 8);
+#if 0
+        cv::Moments mu = moments(contours_dapi_filtered[i], true);
+        cv::Point2f mc = cv::Point2f(   static_cast<float>(mu.m10/mu.m00), 
+                                        static_cast<float>(mu.m01/mu.m00)   );
+        cv::circle(drawing_blue, mc, DAPI_MASK_RADIUS, 255, 1, 8);
+        cv::circle(drawing_green, mc, DAPI_MASK_RADIUS, 255, 1, 8);
+        cv::circle(drawing_red, mc, DAPI_MASK_RADIUS, 255, 1, 8);
+#endif
     }
 
     // Merge the modified red, blue and green layers
