@@ -489,10 +489,13 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
 
     // Draw RFP bondaries
     for (size_t i = 0; i < contours_rfp.size(); i++) {
-        cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_rfp[i]));
-        ellipse(drawing_blue, min_ellipse, 255, 1, 8);
-        ellipse(drawing_green, min_ellipse, 0, 1, 8);
-        ellipse(drawing_red, min_ellipse, 255, 1, 8);
+        //cv::RotatedRect min_ellipse = fitEllipse(cv::Mat(contours_rfp[i]));
+        //ellipse(drawing_blue, min_ellipse, 255, 1, 8);
+        //ellipse(drawing_green, min_ellipse, 0, 1, 8);
+        //ellipse(drawing_red, min_ellipse, 255, 1, 8);
+        drawContours(drawing_blue, contours_gfp, i, 255, 1, 8);
+        drawContours(drawing_green, contours_gfp, i, 0, 1, 8);
+        drawContours(drawing_red, contours_gfp, i, 255, 1, 8);
     }
 
     // Merge the modified red, blue and green layers
