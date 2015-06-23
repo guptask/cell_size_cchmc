@@ -18,7 +18,8 @@
 #define GFP_THRESHOLD           25   // GFP  enhancement threshold
 #define RFP_THRESHOLD           25   // RFP  enhancement threshold
 #define COVERAGE_RATIO          0.5  // Coverage ratio
-#define SOMA_FACTOR             1.5  // Soma radius = factor * nuclues radius
+#define SOMA_FACTOR             1.6  // Soma radius = factor * nuclues radius
+#define PI                      3.14 // Approximate value of pi
 #define DEBUG_FLAG              0    // Debug flag
 
 
@@ -243,23 +244,30 @@ void separationMetrics( std::vector<std::vector<cv::Point>> contours,
                         float *mean_diameter,
                         float *stddev_diameter,
                         float *mean_aspect_ratio,
-                        float *stddev_aspect_ratio  ) {
+                        float *stddev_aspect_ratio,
+                        float *mean_error_ratio,
+                        float *stddev_error_ratio ) {
 
     // Compute the normal distribution parameters of cells
     std::vector<cv::Point2f> mc(contours.size());
     std::vector<float> dia(contours.size());
     std::vector<float> aspect_ratio(contours.size());
+    std::vector<float> error_ratio(contours.size());
 
     for (size_t i = 0; i < contours.size(); i++) {
         cv::Moments mu = moments(contours[i], true);
         mc[i] = cv::Point2f(static_cast<float>(mu.m10/mu.m00), 
                                             static_cast<float>(mu.m01/mu.m00));
         cv::RotatedRect min_area_rect = minAreaRect(cv::Mat(contours[i]));
-        dia[i] = (float) 2 * sqrt(min_area_rect.size.width * min_area_rect.size.height);
         aspect_ratio[i] = float(min_area_rect.size.width)/min_area_rect.size.height;
         if (aspect_ratio[i] > 1.0) {
             aspect_ratio[i] = 1.0/aspect_ratio[i];
         }
+        float actual_area = contourArea(contours[i]);
+        dia[i] = 2 * sqrt(actual_area / PI);
+        float ellipse_area = 
+            (float) (PI * min_area_rect.size.width * min_area_rect.size.height);
+        error_ratio[i] = (ellipse_area - actual_area) / ellipse_area;
     }
     cv::Scalar mean_dia, stddev_dia;
     cv::meanStdDev(dia, mean_dia, stddev_dia);
@@ -270,6 +278,11 @@ void separationMetrics( std::vector<std::vector<cv::Point>> contours,
     cv::meanStdDev(aspect_ratio, mean_ratio, stddev_ratio);
     *mean_aspect_ratio = static_cast<float>(mean_ratio.val[0]);
     *stddev_aspect_ratio = static_cast<float>(stddev_ratio.val[0]);
+
+    cv::Scalar mean_err_ratio, stddev_err_ratio;
+    cv::meanStdDev(error_ratio, mean_err_ratio, stddev_err_ratio);
+    *mean_error_ratio = static_cast<float>(mean_err_ratio.val[0]);
+    *stddev_error_ratio = static_cast<float>(stddev_err_ratio.val[0]);
 }
 
 /* Process the images inside each directory */
@@ -405,34 +418,45 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     // Separation metrics for dapi-gfp cells
     float mean_dia = 0.0, stddev_dia = 0.0;
     float mean_aspect_ratio = 0.0, stddev_aspect_ratio = 0.0;
+    float mean_error_ratio = 0.0, stddev_error_ratio = 0.0;
     separationMetrics(  contours_gfp, 
                         &mean_dia, 
                         &stddev_dia, 
                         &mean_aspect_ratio, 
-                        &stddev_aspect_ratio
+                        &stddev_aspect_ratio, 
+                        &mean_error_ratio, 
+                        &stddev_error_ratio
                      );
     data_stream << contours_gfp.size() << "," 
                 << mean_dia << "," 
                 << stddev_dia << "," 
                 << mean_aspect_ratio << "," 
-                << stddev_aspect_ratio << ",";
+                << stddev_aspect_ratio << "," 
+                << mean_error_ratio << "," 
+                << stddev_error_ratio << ",";
 
     // Separation metrics for dapi-rfp cells
     mean_dia = 0.0;
     stddev_dia = 0.0;
     mean_aspect_ratio = 0.0;
     stddev_aspect_ratio = 0.0;
+    mean_error_ratio = 0.0;
+    stddev_error_ratio = 0.0;
     separationMetrics(  contours_rfp, 
                         &mean_dia, 
                         &stddev_dia, 
                         &mean_aspect_ratio, 
-                        &stddev_aspect_ratio
+                        &stddev_aspect_ratio, 
+                        &mean_error_ratio, 
+                        &stddev_error_ratio
                      );
     data_stream << contours_rfp.size() << "," 
                 << mean_dia << "," 
                 << stddev_dia << "," 
                 << mean_aspect_ratio << "," 
-                << stddev_aspect_ratio << ",";
+                << stddev_aspect_ratio << "," 
+                << mean_error_ratio << "," 
+                << stddev_error_ratio << ",";
 
 
     data_stream << std::endl;
@@ -573,11 +597,15 @@ int main(int argc, char *argv[]) {
     data_stream << "DAPI-GFP Soma Diameter (std. dev.),";
     data_stream << "DAPI-GFP Soma Aspect Ratio (mean),";
     data_stream << "DAPI-GFP Soma Aspect Ratio (std. dev.),";
+    data_stream << "DAPI-GFP Soma Error Ratio (mean),";
+    data_stream << "DAPI-GFP Soma Error Ratio (std. dev.),";
     data_stream << "DAPI-RFP Cell Count,";
     data_stream << "DAPI-RFP Soma Diameter (mean),";
     data_stream << "DAPI-RFP Soma Diameter (std. dev.),";
     data_stream << "DAPI-RFP Soma Aspect Ratio (mean),";
     data_stream << "DAPI-RFP Soma Aspect Ratio (std. dev.),";
+    data_stream << "DAPI-RFP Soma Error Ratio (mean),";
+    data_stream << "DAPI-RFP Soma Error Ratio (std. dev.),";
 
     data_stream << std::endl;
     data_stream.close();
