@@ -15,11 +15,11 @@
 #define DAPI_COVERAGE_RATIO     0.8  // Dapi coverage ratio
 #define MIN_SOMA_SIZE           20   // Min soma size
 #define MAX_ARC_LENGTH_FILTER   600  // Max arc length filter threshold
-#define GFP_THRESHOLD           25   // GFP  enhancement threshold
-#define RFP_THRESHOLD           25   // RFP  enhancement threshold
 #define COVERAGE_RATIO          0.5  // Coverage ratio
 #define SOMA_FACTOR             1.6  // Soma radius = factor * nuclues radius
 #define PI                      3.14 // Approximate value of pi
+#define NUM_AREA_BINS           11   // Number of bins
+#define BIN_AREA                20   // Bin area
 #define DEBUG_FLAG              0    // Debug flag
 
 
@@ -27,7 +27,13 @@
 enum class ChannelType : unsigned char {
     DAPI = 0,
     GFP,
-    RFP
+    GFP_LOW,
+    GFP_MEDIUM,
+    GFP_HIGH,
+    RFP,
+    RFP_LOW,
+    RFP_MEDIUM,
+    RFP_HIGH
 };
 
 /* Hierarchy type */
@@ -78,12 +84,46 @@ bool enhanceImage(  cv::Mat src,
 
         case ChannelType::GFP: {
             // Create the mask
-            cv::threshold(*normalized, *enhanced, GFP_THRESHOLD, 255, cv::THRESH_BINARY);
+            cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_BINARY);
+        } break;
+
+        case ChannelType::GFP_LOW: {
+            // Enhance the gfp low channel
+            cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_TOZERO);
+            cv::threshold(*enhanced, *enhanced, 50, 255, cv::THRESH_TRUNC);
+        } break;
+
+        case ChannelType::GFP_MEDIUM: {
+            // Enhance the gfp medium channel
+            cv::threshold(*normalized, *enhanced, 50, 255, cv::THRESH_TOZERO);
+            cv::threshold(*enhanced, *enhanced, 80, 255, cv::THRESH_TRUNC);
+        } break;
+
+        case ChannelType::GFP_HIGH: {
+            // Enhance the gfp high channel
+            cv::threshold(*normalized, *enhanced, 80, 255, cv::THRESH_BINARY);
         } break;
 
         case ChannelType::RFP: {
             // Create the mask
-            cv::threshold(*normalized, *enhanced, RFP_THRESHOLD, 255, cv::THRESH_BINARY);
+            cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_BINARY);
+        } break;
+
+        case ChannelType::RFP_LOW: {
+            // Enhance the rfp low channel
+            cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_TOZERO);
+            cv::threshold(*enhanced, *enhanced, 50, 255, cv::THRESH_TRUNC);
+        } break;
+
+        case ChannelType::RFP_MEDIUM: {
+            // Enhance the rfp medium channel
+            cv::threshold(*normalized, *enhanced, 50, 255, cv::THRESH_TOZERO);
+            cv::threshold(*enhanced, *enhanced, 80, 255, cv::THRESH_TRUNC);
+        } break;
+
+        case ChannelType::RFP_HIGH: {
+            // Enhance the rfp high channel
+            cv::threshold(*normalized, *enhanced, 80, 255, cv::THRESH_BINARY);
         } break;
 
         default: {
@@ -95,16 +135,36 @@ bool enhanceImage(  cv::Mat src,
 }
 
 /* Find the contours in the image */
-void contourCalc(cv::Mat src, double min_area, cv::Mat *dst, 
+void contourCalc(   cv::Mat src, ChannelType channel_type, 
+                    double min_area, cv::Mat *dst, 
                     std::vector<std::vector<cv::Point>> *contours, 
                     std::vector<cv::Vec4i> *hierarchy, 
                     std::vector<HierarchyType> *validity_mask, 
-                    std::vector<double> *parent_area) {
+                    std::vector<double> *parent_area    ) {
 
     cv::Mat temp_src;
     src.copyTo(temp_src);
-    findContours(temp_src, *contours, *hierarchy, 
-            cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+    switch(channel_type) {
+        case ChannelType::DAPI : {
+            findContours(temp_src, *contours, *hierarchy, cv::RETR_EXTERNAL, 
+                                                        cv::CHAIN_APPROX_SIMPLE);
+        } break;
+
+        case ChannelType::GFP :
+        case ChannelType::GFP_LOW :
+        case ChannelType::GFP_MEDIUM :
+        case ChannelType::GFP_HIGH : 
+        case ChannelType::RFP :
+        case ChannelType::RFP_LOW :
+        case ChannelType::RFP_MEDIUM :
+        case ChannelType::RFP_HIGH : {
+            findContours(temp_src, *contours, *hierarchy, cv::RETR_CCOMP, 
+                                                        cv::CHAIN_APPROX_SIMPLE);
+        } break;
+
+        default: return;
+    }
+
     *dst = cv::Mat::zeros(temp_src.size(), CV_8UC3);
     if (!contours->size()) return;
     validity_mask->assign(contours->size(), HierarchyType::INVALID_CNTR);
@@ -214,6 +274,7 @@ bool findCellSoma( std::vector<cv::Point> nucleus_contour,
         std::vector<HierarchyType> soma_contour_mask;
         std::vector<double> soma_contour_area;
         contourCalc(    *intersection, 
+                        ChannelType::DAPI, 
                         1.0, 
                         &soma_segmented, 
                         &contours_soma, 
@@ -285,6 +346,29 @@ void separationMetrics( std::vector<std::vector<cv::Point>> contours,
     *stddev_error_ratio = static_cast<float>(stddev_err_ratio.val[0]);
 }
 
+/* Group contour areas into bins */
+void binArea(   std::vector<HierarchyType> contour_mask, 
+                std::vector<double> contour_area, 
+                std::string *contour_output ) {
+
+    std::vector<unsigned int> count(NUM_AREA_BINS, 0);
+    for (size_t i = 0; i < contour_mask.size(); i++) {
+        if (contour_mask[i] != HierarchyType::PARENT_CNTR) continue;
+        unsigned int area = static_cast<unsigned int>(round(contour_area[i]));
+        unsigned int bin_index = 
+            (area/BIN_AREA < NUM_AREA_BINS) ? area/BIN_AREA : NUM_AREA_BINS-1;
+        count[bin_index]++;
+    }
+
+    unsigned int contour_cnt = 0;
+    std::string area_binned;
+    for (size_t i = 0; i < count.size(); i++) {
+        area_binned += "," + std::to_string(count[i]);
+        contour_cnt += count[i];
+    }
+    *contour_output = std::to_string(contour_cnt) + area_binned;
+}
+
 /* Process the images inside each directory */
 bool processDir(std::string path, std::string image_name, std::string metrics_file) {
 
@@ -354,16 +438,17 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     std::vector<cv::Vec4i> hierarchy_dapi;
     std::vector<HierarchyType> dapi_contour_mask;
     std::vector<double> dapi_contour_area;
-    contourCalc(dapi_enhanced, 1.0, &dapi_segmented, &contours_dapi, 
-                &hierarchy_dapi, &dapi_contour_mask, &dapi_contour_area);
+    contourCalc(dapi_enhanced, ChannelType::DAPI, 1.0, 
+                &dapi_segmented, &contours_dapi, 
+                &hierarchy_dapi, &dapi_contour_mask, 
+                &dapi_contour_area);
 
-    // Filter the gfp contours
+    // Filter the dapi contours
     std::vector<std::vector<cv::Point>> contours_dapi_filtered;
     filterCells(dapi_enhanced, contours_dapi, dapi_contour_mask, &contours_dapi_filtered);
 
 
     /* GFP image */
-    // Enhance
     cv::Mat gfp_normalized, gfp_enhanced;
     if (!enhanceImage(  gfp, 
                         ChannelType::GFP, 
@@ -372,8 +457,61 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         return false;
     }
 
+    // GFP Low
+    cv::Mat gfp_low_normalized, gfp_low_enhanced;
+    if (!enhanceImage(  gfp, 
+                        ChannelType::GFP_LOW, 
+                        &gfp_low_normalized, 
+                        &gfp_low_enhanced   )) {
+        return false;
+    }
+    cv::Mat gfp_low_segmented;
+    std::vector<std::vector<cv::Point>> contours_gfp_low;
+    std::vector<cv::Vec4i> hierarchy_gfp_low;
+    std::vector<HierarchyType> gfp_low_contour_mask;
+    std::vector<double> gfp_low_contour_area;
+    contourCalc(gfp_low_enhanced, ChannelType::GFP_LOW, 1.0, 
+                &gfp_low_segmented, &contours_gfp_low, 
+                &hierarchy_gfp_low, &gfp_low_contour_mask, 
+                &gfp_low_contour_area);
+
+    // GFP Medium
+    cv::Mat gfp_medium_normalized, gfp_medium_enhanced;
+    if (!enhanceImage(  gfp, 
+                        ChannelType::GFP_MEDIUM, 
+                        &gfp_medium_normalized, 
+                        &gfp_medium_enhanced   )) {
+        return false;
+    }
+    cv::Mat gfp_medium_segmented;
+    std::vector<std::vector<cv::Point>> contours_gfp_medium;
+    std::vector<cv::Vec4i> hierarchy_gfp_medium;
+    std::vector<HierarchyType> gfp_medium_contour_mask;
+    std::vector<double> gfp_medium_contour_area;
+    contourCalc(gfp_medium_enhanced, ChannelType::GFP_MEDIUM, 1.0, 
+                &gfp_medium_segmented, &contours_gfp_medium, 
+                &hierarchy_gfp_medium, &gfp_medium_contour_mask, 
+                &gfp_medium_contour_area);
+
+    // GFP High
+    cv::Mat gfp_high_normalized, gfp_high_enhanced;
+    if (!enhanceImage(  gfp, 
+                        ChannelType::GFP_HIGH, 
+                        &gfp_high_normalized, 
+                        &gfp_high_enhanced   )) {
+        return false;
+    }
+    cv::Mat gfp_high_segmented;
+    std::vector<std::vector<cv::Point>> contours_gfp_high;
+    std::vector<cv::Vec4i> hierarchy_gfp_high;
+    std::vector<HierarchyType> gfp_high_contour_mask;
+    std::vector<double> gfp_high_contour_area;
+    contourCalc(gfp_high_enhanced, ChannelType::GFP_HIGH, 1.0, 
+                &gfp_high_segmented, &contours_gfp_high, 
+                &hierarchy_gfp_high, &gfp_high_contour_mask, 
+                &gfp_high_contour_area);
+
     /* RFP image */
-    // Enhance
     cv::Mat rfp_normalized, rfp_enhanced;
     if (!enhanceImage(  rfp, 
                         ChannelType::RFP, 
@@ -381,6 +519,60 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                         &rfp_enhanced   )) {
         return false;
     }
+
+    // RFP Low
+    cv::Mat rfp_low_normalized, rfp_low_enhanced;
+    if (!enhanceImage(  rfp, 
+                        ChannelType::RFP_LOW, 
+                        &rfp_low_normalized, 
+                        &rfp_low_enhanced   )) {
+        return false;
+    }
+    cv::Mat rfp_low_segmented;
+    std::vector<std::vector<cv::Point>> contours_rfp_low;
+    std::vector<cv::Vec4i> hierarchy_rfp_low;
+    std::vector<HierarchyType> rfp_low_contour_mask;
+    std::vector<double> rfp_low_contour_area;
+    contourCalc(rfp_low_enhanced, ChannelType::RFP_LOW, 1.0, 
+                &rfp_low_segmented, &contours_rfp_low, 
+                &hierarchy_rfp_low, &rfp_low_contour_mask, 
+                &rfp_low_contour_area);
+
+    // RFP Medium
+    cv::Mat rfp_medium_normalized, rfp_medium_enhanced;
+    if (!enhanceImage(  rfp, 
+                        ChannelType::RFP_MEDIUM, 
+                        &rfp_medium_normalized, 
+                        &rfp_medium_enhanced   )) {
+        return false;
+    }
+    cv::Mat rfp_medium_segmented;
+    std::vector<std::vector<cv::Point>> contours_rfp_medium;
+    std::vector<cv::Vec4i> hierarchy_rfp_medium;
+    std::vector<HierarchyType> rfp_medium_contour_mask;
+    std::vector<double> rfp_medium_contour_area;
+    contourCalc(rfp_medium_enhanced, ChannelType::RFP_MEDIUM, 1.0, 
+                &rfp_medium_segmented, &contours_rfp_medium, 
+                &hierarchy_rfp_medium, &rfp_medium_contour_mask, 
+                &rfp_medium_contour_area);
+
+    // RFP High
+    cv::Mat rfp_high_normalized, rfp_high_enhanced;
+    if (!enhanceImage(  rfp, 
+                        ChannelType::RFP_HIGH, 
+                        &rfp_high_normalized, 
+                        &rfp_high_enhanced   )) {
+        return false;
+    }
+    cv::Mat rfp_high_segmented;
+    std::vector<std::vector<cv::Point>> contours_rfp_high;
+    std::vector<cv::Vec4i> hierarchy_rfp_high;
+    std::vector<HierarchyType> rfp_high_contour_mask;
+    std::vector<double> rfp_high_contour_area;
+    contourCalc(rfp_high_enhanced, ChannelType::RFP_HIGH, 1.0, 
+                &rfp_high_segmented, &contours_rfp_high, 
+                &hierarchy_rfp_high, &rfp_high_contour_mask, 
+                &rfp_high_contour_area);
 
 
     /** Classify the cell soma **/
@@ -459,6 +651,41 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                 << stddev_error_ratio << ",";
 
 
+    /* Characterize the gfp channel */
+    // Gfp low
+    std::string gfp_low_output;
+    binArea(gfp_low_contour_mask, gfp_low_contour_area, &gfp_low_output);
+    data_stream << gfp_low_output << ",";
+
+    // Gfp medium
+    std::string gfp_medium_output;
+    binArea(gfp_medium_contour_mask, gfp_medium_contour_area, &gfp_medium_output);
+    data_stream << gfp_medium_output << ",";
+
+    // Gfp high
+    std::string gfp_high_output;
+    binArea(gfp_high_contour_mask, gfp_high_contour_area, &gfp_high_output);
+    data_stream << gfp_high_output << ",";
+
+
+    /* Characterize the rfp channel */
+    // Rfp low
+    std::string rfp_low_output;
+    binArea(rfp_low_contour_mask, rfp_low_contour_area, &rfp_low_output);
+    data_stream << rfp_low_output << ",";
+
+    // Rfp medium
+    std::string rfp_medium_output;
+    binArea(rfp_medium_contour_mask, rfp_medium_contour_area, &rfp_medium_output);
+    data_stream << rfp_medium_output << ",";
+
+    // Red high
+    std::string rfp_high_output;
+    binArea(rfp_high_contour_mask, rfp_high_contour_area, &rfp_high_output);
+    data_stream << rfp_high_output << ",";
+
+
+    // End of entry
     data_stream << std::endl;
     data_stream.close();
 
@@ -606,6 +833,44 @@ int main(int argc, char *argv[]) {
     data_stream << "DAPI-RFP Soma Aspect Ratio (std. dev.),";
     data_stream << "DAPI-RFP Soma Error Ratio (mean),";
     data_stream << "DAPI-RFP Soma Error Ratio (std. dev.),";
+
+    // GFP (low, medium and high) bins
+    data_stream << "GFP_Low_Contour_Count,";
+    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
+        data_stream << i*BIN_AREA << " <= GFP_Low_Contour_Area < " << (i+1)*BIN_AREA << ",";
+    }
+    data_stream << "GFP_Low_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
+
+    data_stream << "GFP_Medium_Contour_Count,";
+    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
+        data_stream << i*BIN_AREA << " <= GFP_Medium_Contour_Area < " << (i+1)*BIN_AREA << ",";
+    }
+    data_stream << "GFP_Medium_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
+
+    data_stream << "GFP_High_Contour_Count,";
+    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
+        data_stream << i*BIN_AREA << " <= GFP_High_Contour_Area < " << (i+1)*BIN_AREA << ",";
+    }
+    data_stream << "GFP_High_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
+
+    // RFP (low, medium and high) bins
+    data_stream << "RFP_Low_Contour_Count,";
+    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
+        data_stream << i*BIN_AREA << " <= RFP_Low_Contour_Area < " << (i+1)*BIN_AREA << ",";
+    }
+    data_stream << "RFP_Low_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
+
+    data_stream << "RFP_Medium_Contour_Count,";
+    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
+        data_stream << i*BIN_AREA << " <= RFP_Medium_Contour_Area < " << (i+1)*BIN_AREA << ",";
+    }
+    data_stream << "RFP_Medium_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
+
+    data_stream << "RFP_High_Contour_Count,";
+    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
+        data_stream << i*BIN_AREA << " <= RFP_High_Contour_Area < " << (i+1)*BIN_AREA << ",";
+    }
+    data_stream << "RFP_High_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
 
     data_stream << std::endl;
     data_stream.close();
