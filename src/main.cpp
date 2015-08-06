@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cassert>
 #include <string>
+#include <iomanip>
 
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/highgui/highgui.hpp"
@@ -21,6 +22,7 @@
 #define NUM_AREA_BINS           11   // Number of bins
 #define BIN_AREA                20   // Bin area
 #define DEBUG_FLAG              0    // Debug flag
+#define SCATTERPLOT_FILE        "scatterplot_data.dat" // Scatterplot data filename
 
 
 /* Channel type */
@@ -30,10 +32,7 @@ enum class ChannelType : unsigned char {
     GFP_LOW,
     GFP_MEDIUM,
     GFP_HIGH,
-    RFP,
-    RFP_LOW,
-    RFP_MEDIUM,
-    RFP_HIGH
+    RFP
 };
 
 /* Hierarchy type */
@@ -109,23 +108,6 @@ bool enhanceImage(  cv::Mat src,
             cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_BINARY);
         } break;
 
-        case ChannelType::RFP_LOW: {
-            // Enhance the rfp low channel
-            cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_TOZERO);
-            cv::threshold(*enhanced, *enhanced, 50, 255, cv::THRESH_TRUNC);
-        } break;
-
-        case ChannelType::RFP_MEDIUM: {
-            // Enhance the rfp medium channel
-            cv::threshold(*normalized, *enhanced, 50, 255, cv::THRESH_TOZERO);
-            cv::threshold(*enhanced, *enhanced, 80, 255, cv::THRESH_TRUNC);
-        } break;
-
-        case ChannelType::RFP_HIGH: {
-            // Enhance the rfp high channel
-            cv::threshold(*normalized, *enhanced, 80, 255, cv::THRESH_BINARY);
-        } break;
-
         default: {
             std::cerr << "Invalid channel type" << std::endl;
             return false;
@@ -146,6 +128,7 @@ void contourCalc(   cv::Mat src, ChannelType channel_type,
     src.copyTo(temp_src);
     switch(channel_type) {
         case ChannelType::DAPI : {
+        case ChannelType::RFP :
             findContours(temp_src, *contours, *hierarchy, cv::RETR_EXTERNAL, 
                                                         cv::CHAIN_APPROX_SIMPLE);
         } break;
@@ -153,11 +136,7 @@ void contourCalc(   cv::Mat src, ChannelType channel_type,
         case ChannelType::GFP :
         case ChannelType::GFP_LOW :
         case ChannelType::GFP_MEDIUM :
-        case ChannelType::GFP_HIGH : 
-        case ChannelType::RFP :
-        case ChannelType::RFP_LOW :
-        case ChannelType::RFP_MEDIUM :
-        case ChannelType::RFP_HIGH : {
+        case ChannelType::GFP_HIGH : {
             findContours(temp_src, *contours, *hierarchy, cv::RETR_CCOMP, 
                                                         cv::CHAIN_APPROX_SIMPLE);
         } break;
@@ -369,6 +348,49 @@ void binArea(   std::vector<HierarchyType> contour_mask,
     *contour_output = std::to_string(contour_cnt) + area_binned;
 }
 
+void rfpScatterPlot(    std::string path,
+                        cv::Mat image,
+                        std::vector<std::vector<cv::Point>> contours,
+                        std::vector<HierarchyType> contour_mask ) {
+
+    std::string scatter_file = path + SCATTERPLOT_FILE;
+    std::ofstream data_stream;
+    data_stream.open(scatter_file, std::ios::app);
+    if (!data_stream.is_open()) {
+        std::cerr << "Could not create the scatter file." << std::endl;
+        return;
+    }
+
+    std::vector<float> avg_intensity(contours.size(), 0.f);
+    cv::Mat labels = cv::Mat::zeros(image.size(), CV_8UC1);
+    for (size_t i = 0; i < contours.size(); i++) {
+        cv::drawContours(labels, contours, i, cv::Scalar(i+1), CV_FILLED);
+    }
+    std::vector<float> counts(contours.size(), 0.f);
+    const int width = image.rows;
+    for (size_t i = 0; i < (size_t) image.rows; i++) {
+        for (size_t j = 0; j < (size_t) image.cols; j++) {
+            unsigned char label = labels.data[i*width + j];
+            if (!label) {
+                continue;
+            } else {
+                label -= 1;
+            }
+            unsigned char value = image.data[i*width + j];
+            avg_intensity[label] += value;
+            ++counts[label];
+        }
+    }
+    for (size_t i = 0; i < avg_intensity.size(); i++) {
+        if (!counts[i] || !avg_intensity[i] || (counts[i] < 10) || (counts[i] > 2000)) continue;
+        avg_intensity[i] /= counts[i];
+        data_stream << std::setw(12) << avg_intensity[i] 
+                    << std::setw(10) << log10(counts[i]) 
+                    << std::endl;
+    }
+    data_stream.close();
+}
+
 /* Process the images inside each directory */
 bool processDir(std::string path, std::string image_name, std::string metrics_file) {
 
@@ -519,60 +541,18 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                         &rfp_enhanced   )) {
         return false;
     }
+    cv::Mat rfp_segmented;
+    std::vector<std::vector<cv::Point>> contours_rfp_vec;
+    std::vector<cv::Vec4i> hierarchy_rfp;
+    std::vector<HierarchyType> rfp_contour_mask;
+    std::vector<double> rfp_contour_area;
+    contourCalc(rfp_normalized, ChannelType::RFP, 1.0, 
+                &rfp_segmented, &contours_rfp_vec, 
+                &hierarchy_rfp, &rfp_contour_mask, 
+                &rfp_contour_area);
 
-    // RFP Low
-    cv::Mat rfp_low_normalized, rfp_low_enhanced;
-    if (!enhanceImage(  rfp, 
-                        ChannelType::RFP_LOW, 
-                        &rfp_low_normalized, 
-                        &rfp_low_enhanced   )) {
-        return false;
-    }
-    cv::Mat rfp_low_segmented;
-    std::vector<std::vector<cv::Point>> contours_rfp_low;
-    std::vector<cv::Vec4i> hierarchy_rfp_low;
-    std::vector<HierarchyType> rfp_low_contour_mask;
-    std::vector<double> rfp_low_contour_area;
-    contourCalc(rfp_low_enhanced, ChannelType::RFP_LOW, 1.0, 
-                &rfp_low_segmented, &contours_rfp_low, 
-                &hierarchy_rfp_low, &rfp_low_contour_mask, 
-                &rfp_low_contour_area);
-
-    // RFP Medium
-    cv::Mat rfp_medium_normalized, rfp_medium_enhanced;
-    if (!enhanceImage(  rfp, 
-                        ChannelType::RFP_MEDIUM, 
-                        &rfp_medium_normalized, 
-                        &rfp_medium_enhanced   )) {
-        return false;
-    }
-    cv::Mat rfp_medium_segmented;
-    std::vector<std::vector<cv::Point>> contours_rfp_medium;
-    std::vector<cv::Vec4i> hierarchy_rfp_medium;
-    std::vector<HierarchyType> rfp_medium_contour_mask;
-    std::vector<double> rfp_medium_contour_area;
-    contourCalc(rfp_medium_enhanced, ChannelType::RFP_MEDIUM, 1.0, 
-                &rfp_medium_segmented, &contours_rfp_medium, 
-                &hierarchy_rfp_medium, &rfp_medium_contour_mask, 
-                &rfp_medium_contour_area);
-
-    // RFP High
-    cv::Mat rfp_high_normalized, rfp_high_enhanced;
-    if (!enhanceImage(  rfp, 
-                        ChannelType::RFP_HIGH, 
-                        &rfp_high_normalized, 
-                        &rfp_high_enhanced   )) {
-        return false;
-    }
-    cv::Mat rfp_high_segmented;
-    std::vector<std::vector<cv::Point>> contours_rfp_high;
-    std::vector<cv::Vec4i> hierarchy_rfp_high;
-    std::vector<HierarchyType> rfp_high_contour_mask;
-    std::vector<double> rfp_high_contour_area;
-    contourCalc(rfp_high_enhanced, ChannelType::RFP_HIGH, 1.0, 
-                &rfp_high_segmented, &contours_rfp_high, 
-                &hierarchy_rfp_high, &rfp_high_contour_mask, 
-                &rfp_high_contour_area);
+    // RFP Scatter plot
+    rfpScatterPlot(path, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
 
 
     /** Classify the cell soma **/
@@ -666,23 +646,6 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     std::string gfp_high_output;
     binArea(gfp_high_contour_mask, gfp_high_contour_area, &gfp_high_output);
     data_stream << gfp_high_output << ",";
-
-
-    /* Characterize the rfp channel */
-    // Rfp low
-    std::string rfp_low_output;
-    binArea(rfp_low_contour_mask, rfp_low_contour_area, &rfp_low_output);
-    data_stream << rfp_low_output << ",";
-
-    // Rfp medium
-    std::string rfp_medium_output;
-    binArea(rfp_medium_contour_mask, rfp_medium_contour_area, &rfp_medium_output);
-    data_stream << rfp_medium_output << ",";
-
-    // Red high
-    std::string rfp_high_output;
-    binArea(rfp_high_contour_mask, rfp_high_contour_area, &rfp_high_output);
-    data_stream << rfp_high_output << ",";
 
 
     // End of entry
@@ -800,6 +763,16 @@ int main(int argc, char *argv[]) {
     }
     fclose(file);
 
+    /* Create the scatterplot data file */
+    std::string scatterplot_file = path + SCATTERPLOT_FILE;
+    std::ofstream scatterplot_stream;
+    scatterplot_stream.open(scatterplot_file, std::ios::out);
+    if (!scatterplot_stream.is_open()) {
+        std::cerr << "Could not create the scatter plot file." << std::endl;
+        return -1;
+    }
+    scatterplot_stream.close();
+
     /* Create and prepare the file for metrics */
     std::string metrics_file_name = path.substr(path.find_first_of("/")+1);
     std::size_t found = metrics_file_name.find_first_of("/");
@@ -853,24 +826,6 @@ int main(int argc, char *argv[]) {
     }
     data_stream << "GFP_High_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
 
-    // RFP (low, medium and high) bins
-    data_stream << "RFP_Low_Contour_Count,";
-    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
-        data_stream << i*BIN_AREA << " <= RFP_Low_Contour_Area < " << (i+1)*BIN_AREA << ",";
-    }
-    data_stream << "RFP_Low_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
-
-    data_stream << "RFP_Medium_Contour_Count,";
-    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
-        data_stream << i*BIN_AREA << " <= RFP_Medium_Contour_Area < " << (i+1)*BIN_AREA << ",";
-    }
-    data_stream << "RFP_Medium_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
-
-    data_stream << "RFP_High_Contour_Count,";
-    for (unsigned int i = 0; i < NUM_AREA_BINS-1; i++) {
-        data_stream << i*BIN_AREA << " <= RFP_High_Contour_Area < " << (i+1)*BIN_AREA << ",";
-    }
-    data_stream << "RFP_High_Contour_Area >= " << (NUM_AREA_BINS-1)*BIN_AREA << ",";
 
     data_stream << std::endl;
     data_stream.close();
