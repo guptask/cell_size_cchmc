@@ -22,8 +22,10 @@
 #define NUM_AREA_BINS           11   // Number of bins
 #define BIN_AREA                20   // Bin area
 #define DEBUG_FLAG              0    // Debug flag
-#define SCATTERPLOT_CONTROL     "scatterplot_control.dat"   // Scatterplot control
-#define SCATTERPLOT_SZ          "scatterplot_sz.dat"        // Scatterplot sz
+#define SCATTERPLOT_CONTROL     "scatterplot_control.dat"       // Scatterplot control
+#define SCATTERPLOT_SZ          "scatterplot_sz.dat"            // Scatterplot sz
+#define SCATTER_CONTROL_STAT    "scatterplot_control_stat.dat"  // Scatterplot control stat
+#define SCATTER_SZ_STAT         "scatterplot_sz_stat.dat"       // Scatterplot sz stat
 
 
 /* Channel type */
@@ -363,11 +365,12 @@ void binArea(   std::vector<HierarchyType> contour_mask,
     *contour_output = std::to_string(contour_cnt) + area_binned;
 }
 
-void rfpScatterPlot(    std::string path,
-                        bool is_control,
-                        cv::Mat image,
-                        std::vector<std::vector<cv::Point>> contours,
-                        std::vector<HierarchyType> contour_mask ) {
+/* Scatter plot */
+void scatterPlot(   std::string path,
+                    bool is_control,
+                    cv::Mat image,
+                    std::vector<std::vector<cv::Point>> contours,
+                    std::vector<HierarchyType> contour_mask     ) {
 
     std::string scatter_file = path;
     scatter_file += (is_control) ? SCATTERPLOT_CONTROL : SCATTERPLOT_SZ;
@@ -401,11 +404,57 @@ void rfpScatterPlot(    std::string path,
     for (size_t i = 0; i < avg_intensity.size(); i++) {
         if (!counts[i] || !avg_intensity[i] || (counts[i] < 10) || (counts[i] > 1000)) continue;
         avg_intensity[i] /= counts[i];
-        data_stream << std::setw(12) << avg_intensity[i] 
+        data_stream << std::setw(12) << (unsigned int) avg_intensity[i] 
                     << std::setw(10) << log10(counts[i]) 
                     << std::endl;
     }
     data_stream.close();
+}
+
+/* Plot scatter plot mean and variance */
+void scatterPlotStat( std::string path ) {
+
+    for (unsigned int ctrl_indx = 0; ctrl_indx < 2; ctrl_indx++) {
+        std::vector<float> plot[256];
+        std::string scatter_file = path;
+        scatter_file += (ctrl_indx) ? SCATTERPLOT_CONTROL : SCATTERPLOT_SZ;
+        FILE *file = fopen(scatter_file.c_str(), "r");
+        if (!file) {
+            std::cerr << "Could not read scatterplot file." << std::endl;
+            exit(1);
+        }
+        char line[128];
+        while (fgets(line, sizeof(line), file) != NULL) {
+            line[strlen(line)-1] = 0;
+            char *str = strtok(line, " ");
+            assert(str);
+            auto intensity = atoi(str);
+            str = strtok(NULL, " ");
+            assert(str);
+            float log10_area = (float) atof(str);
+            plot[intensity].push_back(log10_area);
+        }
+        fclose(file);
+
+        std::string stat_file = path;
+        stat_file += (ctrl_indx) ? SCATTER_CONTROL_STAT : SCATTER_SZ_STAT;
+        std::ofstream data_stream;
+        data_stream.open(stat_file, std::ios::out);
+        if (!data_stream.is_open()) {
+            std::cerr << "Could not create the stat file." << std::endl;
+            exit(1);
+        }
+        for (unsigned int i = 0; i < 256; i++) {
+            if (!plot[i].size()) continue;
+            cv::Scalar mean, stddev;
+            cv::meanStdDev(plot[i], mean, stddev);
+            data_stream << std::setw(5) << i
+                        << std::setw(9) << static_cast<float>(mean.val[0])
+                        << std::setw(9) << static_cast<float>(stddev.val[0])
+                        << std::endl;
+        }
+        data_stream.close();
+    }
 }
 
 /* Process the images inside each directory */
@@ -589,7 +638,7 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         is_control = true;
     }
     // SZ - 1792, 1835, 2038, 2497
-    rfpScatterPlot(path, is_control, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
+    scatterPlot(path, is_control, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
 
 
     /** Classify the cell soma **/
@@ -886,6 +935,10 @@ int main(int argc, char *argv[]) {
             return -1;
         }
     }
+
+    /* Generate the scatter plot */
+    std::cout << "Calculating the scatter plot statistics." << std::endl;
+    scatterPlotStat(path);
 
     return 0;
 }
