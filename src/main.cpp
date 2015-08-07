@@ -478,13 +478,6 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         mkdir(out_directory.c_str(), 0700);
     }
 
-    // Create the plots directory
-    std::string plots_directory = path + PLOTS_DIR_NAME;
-    st = {0};
-    if (stat(plots_directory.c_str(), &st) == -1) {
-        mkdir(plots_directory.c_str(), 0700);
-    }
-
     // Analyzed image name
     std::string analyzed_image_name = image_name;
     std::size_t found = analyzed_image_name.find("dapi");
@@ -647,7 +640,7 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     }
     // Note: Do nothing for SZ - 1792, 1835, 2038, 2497
 
-    scatterPlot(    plots_directory,
+    scatterPlot(    path + PLOTS_DIR_NAME,
                     is_control,
                     rfp_normalized,
                     contours_rfp_vec,
@@ -863,11 +856,17 @@ int main(int argc, char *argv[]) {
     fclose(file);
 
     /* Create the scatterplot Control and SZ file */
-    std::string scatter_control_file = path + SCATTERPLOT_CONTROL;
-    std::string scatter_sz_file = path + SCATTERPLOT_SZ;
+    // Create the plots directory
+    std::string plots_directory = path + PLOTS_DIR_NAME;
+    struct stat st = {0};
+    if (stat(plots_directory.c_str(), &st) == -1) {
+        mkdir(plots_directory.c_str(), 0700);
+    }
+
     std::ofstream scatterplot_stream;
 
     // Control
+    std::string scatter_control_file = plots_directory + SCATTERPLOT_CONTROL;
     scatterplot_stream.open(scatter_control_file, std::ios::out);
     if (!scatterplot_stream.is_open()) {
         std::cerr << "Could not create the scatter plot Control file." << std::endl;
@@ -876,6 +875,7 @@ int main(int argc, char *argv[]) {
     scatterplot_stream.close();
 
     // SZ
+    std::string scatter_sz_file = plots_directory + SCATTERPLOT_SZ;
     scatterplot_stream.open(scatter_sz_file, std::ios::out);
     if (!scatterplot_stream.is_open()) {
         std::cerr << "Could not create the scatter plot SZ file." << std::endl;
@@ -951,7 +951,7 @@ int main(int argc, char *argv[]) {
 
     /* Generate the scatter plot */
     std::cout << "Calculating the scatter plot statistics." << std::endl;
-    scatterPlotStat(path + PLOTS_DIR_NAME);
+    scatterPlotStat(plots_directory);
 
     return 0;
 }
