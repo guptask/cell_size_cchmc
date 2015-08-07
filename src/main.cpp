@@ -434,9 +434,6 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     analyzed_image_name.replace(found, 4, "merge");
     data_stream << analyzed_image_name << ",";
 
-    // Determine whether the image is Control or SZ
-    bool is_control = false;
-
     /** Extract the dapi, gfp and rfp streams for each input image **/
 
     // DAPI
@@ -577,7 +574,21 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                 &hierarchy_rfp, &rfp_contour_mask, 
                 &rfp_contour_area);
 
-    // RFP Scatter plot
+    /* RFP Scatter plot */
+    // Determine whether the image is Control or SZ
+    bool is_control = false;
+    std::string sample_id = image_name.substr(0, 4);
+    // Control - 3440, 3651, 4506, 9319, 9429, BJ2E, BJ3E
+    if (    (sample_id == "3440") ||
+            (sample_id == "3651") ||
+            (sample_id == "4506") ||
+            (sample_id == "9319") ||
+            (sample_id == "9429") ||
+            (sample_id == "BJ2E") ||
+            (sample_id == "BJ3E")  ) {
+        is_control = true;
+    }
+    // SZ - 1792, 1835, 2038, 2497
     rfpScatterPlot(path, is_control, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
 
 
