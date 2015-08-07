@@ -22,6 +22,7 @@
 #define NUM_AREA_BINS           11   // Number of bins
 #define BIN_AREA                20   // Bin area
 #define DEBUG_FLAG              0    // Debug flag
+#define PLOTS_DIR_NAME          "plots/"                        // plots directory
 #define SCATTERPLOT_CONTROL     "scatterplot_control.dat"       // Scatterplot control
 #define SCATTERPLOT_SZ          "scatterplot_sz.dat"            // Scatterplot sz
 #define SCATTER_CONTROL_STAT    "scatterplot_control_stat.dat"  // Scatterplot control stat
@@ -477,6 +478,13 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         mkdir(out_directory.c_str(), 0700);
     }
 
+    // Create the plots directory
+    std::string plots_directory = path + PLOTS_DIR_NAME;
+    st = {0};
+    if (stat(plots_directory.c_str(), &st) == -1) {
+        mkdir(plots_directory.c_str(), 0700);
+    }
+
     // Analyzed image name
     std::string analyzed_image_name = image_name;
     std::size_t found = analyzed_image_name.find("dapi");
@@ -637,8 +645,13 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
             (sample_id == "BJ3E")  ) {
         is_control = true;
     }
-    // SZ - 1792, 1835, 2038, 2497
-    scatterPlot(path, is_control, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
+    // Note: Do nothing for SZ - 1792, 1835, 2038, 2497
+
+    scatterPlot(    plots_directory,
+                    is_control,
+                    rfp_normalized,
+                    contours_rfp_vec,
+                    rfp_contour_mask    );
 
 
     /** Classify the cell soma **/
@@ -938,7 +951,7 @@ int main(int argc, char *argv[]) {
 
     /* Generate the scatter plot */
     std::cout << "Calculating the scatter plot statistics." << std::endl;
-    scatterPlotStat(path);
+    scatterPlotStat(path + PLOTS_DIR_NAME);
 
     return 0;
 }
