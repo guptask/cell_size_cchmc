@@ -22,7 +22,8 @@
 #define NUM_AREA_BINS           11   // Number of bins
 #define BIN_AREA                20   // Bin area
 #define DEBUG_FLAG              0    // Debug flag
-#define SCATTERPLOT_FILE        "scatterplot_data.dat" // Scatterplot data filename
+#define SCATTERPLOT_CONTROL     "scatterplot_control.dat"   // Scatterplot control
+#define SCATTERPLOT_SZ          "scatterplot_sz.dat"        // Scatterplot sz
 
 
 /* Channel type */
@@ -32,7 +33,8 @@ enum class ChannelType : unsigned char {
     GFP_LOW,
     GFP_MEDIUM,
     GFP_HIGH,
-    RFP
+    RFP_TYPE1,
+    RFP_TYPE2
 };
 
 /* Hierarchy type */
@@ -103,9 +105,21 @@ bool enhanceImage(  cv::Mat src,
             cv::threshold(*normalized, *enhanced, 80, 255, cv::THRESH_BINARY);
         } break;
 
-        case ChannelType::RFP: {
+        case ChannelType::RFP_TYPE1: {
             // Create the mask
             cv::threshold(*normalized, *enhanced, 25, 255, cv::THRESH_BINARY);
+        } break;
+
+        case ChannelType::RFP_TYPE2: {
+            // Create the mask
+            cv::Mat temp1, temp2;
+            // threshold >= 50
+            cv::threshold(*normalized, temp1, 50, 255, cv::THRESH_BINARY);
+            // 25 <= threshold <= 45
+            cv::threshold(*normalized, temp2, 45, 255, cv::THRESH_TOZERO_INV);
+            cv::threshold(temp2, temp2, 25, 255, cv::THRESH_BINARY);
+
+            bitwise_or(temp1, temp2, *enhanced);
         } break;
 
         default: {
@@ -127,8 +141,9 @@ void contourCalc(   cv::Mat src, ChannelType channel_type,
     cv::Mat temp_src;
     src.copyTo(temp_src);
     switch(channel_type) {
-        case ChannelType::DAPI : {
-        case ChannelType::RFP :
+        case ChannelType::DAPI :
+        case ChannelType::RFP_TYPE1 :
+        case ChannelType::RFP_TYPE2 : {
             findContours(temp_src, *contours, *hierarchy, cv::RETR_EXTERNAL, 
                                                         cv::CHAIN_APPROX_SIMPLE);
         } break;
@@ -349,11 +364,13 @@ void binArea(   std::vector<HierarchyType> contour_mask,
 }
 
 void rfpScatterPlot(    std::string path,
+                        bool is_control,
                         cv::Mat image,
                         std::vector<std::vector<cv::Point>> contours,
                         std::vector<HierarchyType> contour_mask ) {
 
-    std::string scatter_file = path + SCATTERPLOT_FILE;
+    std::string scatter_file = path;
+    scatter_file += (is_control) ? SCATTERPLOT_CONTROL : SCATTERPLOT_SZ;
     std::ofstream data_stream;
     data_stream.open(scatter_file, std::ios::app);
     if (!data_stream.is_open()) {
@@ -382,7 +399,7 @@ void rfpScatterPlot(    std::string path,
         }
     }
     for (size_t i = 0; i < avg_intensity.size(); i++) {
-        if (!counts[i] || !avg_intensity[i] || (counts[i] < 10) || (counts[i] > 2000)) continue;
+        if (!counts[i] || !avg_intensity[i] || (counts[i] < 10) || (counts[i] > 1000)) continue;
         avg_intensity[i] /= counts[i];
         data_stream << std::setw(12) << avg_intensity[i] 
                     << std::setw(10) << log10(counts[i]) 
@@ -417,6 +434,8 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     analyzed_image_name.replace(found, 4, "merge");
     data_stream << analyzed_image_name << ",";
 
+    // Determine whether the image is Control or SZ
+    bool is_control = false;
 
     /** Extract the dapi, gfp and rfp streams for each input image **/
 
@@ -534,11 +553,18 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
                 &gfp_high_contour_area);
 
     /* RFP image */
-    cv::Mat rfp_normalized, rfp_enhanced;
+    cv::Mat rfp_normalized, rfp_enhanced_type1;
     if (!enhanceImage(  rfp, 
-                        ChannelType::RFP, 
+                        ChannelType::RFP_TYPE1, 
                         &rfp_normalized, 
-                        &rfp_enhanced   )) {
+                        &rfp_enhanced_type1 )) {
+        return false;
+    }
+    cv::Mat rfp_enhanced_type2;
+    if (!enhanceImage(  rfp, 
+                        ChannelType::RFP_TYPE2, 
+                        &rfp_normalized, 
+                        &rfp_enhanced_type2 )) {
         return false;
     }
     cv::Mat rfp_segmented;
@@ -546,20 +572,20 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
     std::vector<cv::Vec4i> hierarchy_rfp;
     std::vector<HierarchyType> rfp_contour_mask;
     std::vector<double> rfp_contour_area;
-    contourCalc(rfp_normalized, ChannelType::RFP, 1.0, 
+    contourCalc(rfp_enhanced_type2, ChannelType::RFP_TYPE2, 1.0, 
                 &rfp_segmented, &contours_rfp_vec, 
                 &hierarchy_rfp, &rfp_contour_mask, 
                 &rfp_contour_area);
 
     // RFP Scatter plot
-    rfpScatterPlot(path, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
+    rfpScatterPlot(path, is_control, rfp_normalized, contours_rfp_vec, rfp_contour_mask);
 
 
     /** Classify the cell soma **/
 
     std::vector<std::vector<cv::Point>> contours_gfp, contours_rfp;
     cv::Mat gfp_intersection = cv::Mat::zeros(gfp_enhanced.size(), CV_8UC1);
-    cv::Mat rfp_intersection = cv::Mat::zeros(rfp_enhanced.size(), CV_8UC1);
+    cv::Mat rfp_intersection = cv::Mat::zeros(rfp_enhanced_type1.size(), CV_8UC1);
     for (size_t i = 0; i < contours_dapi_filtered.size(); i++) {
 
         // Find DAPI-GFP Cell Soma
@@ -575,12 +601,12 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
 
         // Find DAPI-RFP Cell Soma
         std::vector<cv::Point> rfp_contour;
-        if (findCellSoma( contours_dapi_filtered[i], rfp_enhanced, &temp, &rfp_contour )) {
+        if (findCellSoma( contours_dapi_filtered[i], rfp_enhanced_type1, &temp, &rfp_contour )) {
             contours_rfp.push_back(rfp_contour);
             bitwise_or(rfp_intersection, temp, rfp_intersection);
             cv::Mat temp_not;
             bitwise_not(temp, temp_not);
-            bitwise_and(rfp_enhanced, temp_not, rfp_enhanced);
+            bitwise_and(rfp_enhanced_type1, temp_not, rfp_enhanced_type1);
         }
     }
 
@@ -661,7 +687,7 @@ bool processDir(std::string path, std::string image_name, std::string metrics_fi
         //cv::Mat drawing_blue_debug  = 2*dapi_normalized;
         //cv::Mat drawing_green_debug = cv::Mat::zeros(gfp_enhanced.size(), CV_8UC1);
         cv::Mat drawing_green_debug = gfp_intersection;
-        cv::Mat drawing_red_debug   = cv::Mat::zeros(rfp_enhanced.size(), CV_8UC1);
+        cv::Mat drawing_red_debug   = cv::Mat::zeros(rfp_enhanced_type1.size(), CV_8UC1);
         //cv::Mat drawing_red_debug = rfp_intersection;
 
         // Draw DAPI bondaries
@@ -763,12 +789,23 @@ int main(int argc, char *argv[]) {
     }
     fclose(file);
 
-    /* Create the scatterplot data file */
-    std::string scatterplot_file = path + SCATTERPLOT_FILE;
+    /* Create the scatterplot Control and SZ file */
+    std::string scatter_control_file = path + SCATTERPLOT_CONTROL;
+    std::string scatter_sz_file = path + SCATTERPLOT_SZ;
     std::ofstream scatterplot_stream;
-    scatterplot_stream.open(scatterplot_file, std::ios::out);
+
+    // Control
+    scatterplot_stream.open(scatter_control_file, std::ios::out);
     if (!scatterplot_stream.is_open()) {
-        std::cerr << "Could not create the scatter plot file." << std::endl;
+        std::cerr << "Could not create the scatter plot Control file." << std::endl;
+        return -1;
+    }
+    scatterplot_stream.close();
+
+    // SZ
+    scatterplot_stream.open(scatter_sz_file, std::ios::out);
+    if (!scatterplot_stream.is_open()) {
+        std::cerr << "Could not create the scatter plot SZ file." << std::endl;
         return -1;
     }
     scatterplot_stream.close();
