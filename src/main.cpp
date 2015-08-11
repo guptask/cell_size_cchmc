@@ -463,13 +463,13 @@ void scatterPlotStat( std::string path ) {
             std::sort(plot[intensity].begin(), plot[intensity].end());
             auto len = (unsigned int) plot[intensity].size();
             data_stream << std::setw(3) << count
-                        << std::setw(9) << plot[intensity][0]
-                        << std::setw(9) << plot[intensity][len/4]
-                        << std::setw(9) << plot[intensity][len/2]
-                        << std::setw(9) << plot[intensity][3*len/4]
-                        << std::setw(9) << plot[intensity][len-1]
+                        << std::setw(9) << log10(plot[intensity][0])
+                        << std::setw(9) << log10(plot[intensity][len/4])
+                        << std::setw(9) << log10(plot[intensity][len/2])
+                        << std::setw(9) << log10(plot[intensity][3*len/4])
+                        << std::setw(9) << log10(plot[intensity][len-1])
                         << std::setw(9) << "0.3"
-                        << std::setw(9) << intensity
+                        << std::setw(9) << log(intensity)
                         << std::endl;
         }
         data_stream.close();
