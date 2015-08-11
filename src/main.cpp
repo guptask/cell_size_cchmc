@@ -6,6 +6,7 @@
 #include <cassert>
 #include <string>
 #include <iomanip>
+#include <algorithm>
 
 #include "opencv2/imgproc/imgproc.hpp"
 #include "opencv2/highgui/highgui.hpp"
@@ -406,7 +407,7 @@ void scatterPlot(   std::string path,
         if (!counts[i] || !avg_intensity[i] || (counts[i] < 10) || (counts[i] > 1000)) continue;
         avg_intensity[i] /= counts[i];
         data_stream << std::setw(12) << (unsigned int) avg_intensity[i] 
-                    << std::setw(10) << log10(counts[i]) 
+                    << std::setw(10) << (unsigned int) counts[i] 
                     << std::endl;
     }
     data_stream.close();
@@ -416,7 +417,7 @@ void scatterPlot(   std::string path,
 void scatterPlotStat( std::string path ) {
 
     for (unsigned int ctrl_indx = 0; ctrl_indx < 2; ctrl_indx++) {
-        std::vector<float> plot[256];
+        std::vector<unsigned int> plot[256];
         std::string scatter_file = path;
         scatter_file += (ctrl_indx) ? SCATTERPLOT_CONTROL : SCATTERPLOT_SZ;
         FILE *file = fopen(scatter_file.c_str(), "r");
@@ -432,8 +433,8 @@ void scatterPlotStat( std::string path ) {
             auto intensity = atoi(str);
             str = strtok(NULL, " ");
             assert(str);
-            float log10_area = (float) atof(str);
-            plot[intensity].push_back(log10_area);
+            auto area = (unsigned int) atoi(str);
+            plot[intensity].insert(plot[intensity].begin(), area);
         }
         fclose(file);
 
@@ -445,13 +446,30 @@ void scatterPlotStat( std::string path ) {
             std::cerr << "Could not create the stat file." << std::endl;
             exit(1);
         }
-        for (unsigned int i = 0; i < 256; i++) {
-            if (!plot[i].size()) continue;
-            cv::Scalar mean, stddev;
-            cv::meanStdDev(plot[i], mean, stddev);
-            data_stream << std::setw(5) << i
-                        << std::setw(9) << static_cast<float>(mean.val[0])
-                        << std::setw(9) << static_cast<float>(stddev.val[0])
+
+        data_stream << std::setw(3) << "#x"
+                    << std::setw(6) << "min"
+                    << std::setw(6) << "q1"
+                    << std::setw(6) << "median"
+                    << std::setw(6) << "q3"
+                    << std::setw(6) << "max"
+                    << std::setw(6) << "width"
+                    << std::setw(6) << "intensity"
+                    << std::endl;
+        unsigned int count = 0;
+        for (unsigned int intensity = 0; intensity < 256; intensity++) {
+            if (!plot[intensity].size()) continue;
+            count++;
+            std::sort(plot[intensity].begin(), plot[intensity].end());
+            auto len = (unsigned int) plot[intensity].size();
+            data_stream << std::setw(3) << count
+                        << std::setw(6) << plot[intensity][0]
+                        << std::setw(6) << plot[intensity][len/4]
+                        << std::setw(6) << plot[intensity][len/2]
+                        << std::setw(6) << plot[intensity][3*len/4]
+                        << std::setw(6) << plot[intensity][len-1]
+                        << std::setw(6) << "0.3"
+                        << std::setw(6) << intensity
                         << std::endl;
         }
         data_stream.close();
