@@ -448,13 +448,13 @@ void scatterPlotStat( std::string path ) {
         }
 
         data_stream << std::setw(3) << "#x"
-                    << std::setw(6) << "min"
-                    << std::setw(6) << "q1"
-                    << std::setw(6) << "median"
-                    << std::setw(6) << "q3"
-                    << std::setw(6) << "max"
-                    << std::setw(6) << "width"
-                    << std::setw(6) << "intensity"
+                    << std::setw(9) << "min"
+                    << std::setw(9) << "q1"
+                    << std::setw(9) << "median"
+                    << std::setw(9) << "q3"
+                    << std::setw(9) << "max"
+                    << std::setw(9) << "width"
+                    << std::setw(9) << " intensity"
                     << std::endl;
         unsigned int count = 0;
         for (unsigned int intensity = 0; intensity < 256; intensity++) {
@@ -463,13 +463,13 @@ void scatterPlotStat( std::string path ) {
             std::sort(plot[intensity].begin(), plot[intensity].end());
             auto len = (unsigned int) plot[intensity].size();
             data_stream << std::setw(3) << count
-                        << std::setw(6) << plot[intensity][0]
-                        << std::setw(6) << plot[intensity][len/4]
-                        << std::setw(6) << plot[intensity][len/2]
-                        << std::setw(6) << plot[intensity][3*len/4]
-                        << std::setw(6) << plot[intensity][len-1]
-                        << std::setw(6) << "0.3"
-                        << std::setw(6) << intensity
+                        << std::setw(9) << plot[intensity][0]
+                        << std::setw(9) << plot[intensity][len/4]
+                        << std::setw(9) << plot[intensity][len/2]
+                        << std::setw(9) << plot[intensity][3*len/4]
+                        << std::setw(9) << plot[intensity][len-1]
+                        << std::setw(9) << "0.3"
+                        << std::setw(9) << intensity
                         << std::endl;
         }
         data_stream.close();
