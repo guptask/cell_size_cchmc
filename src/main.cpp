@@ -466,9 +466,10 @@ void scatterPlotStat( std::string path ) {
                 bin.insert(bin.end(), plot[intensity].begin(), plot[intensity].end());
             }
             if (!intensity%10) continue;
+            auto len = (unsigned int) bin.size();
+            if (!len) continue;
             count++;
             std::sort(bin.begin(), bin.end());
-            auto len = (unsigned int) bin.size();
             data_stream << std::setw(3) << count
                         << std::setw(9) << log10(bin[0])
                         << std::setw(9) << log10(bin[len/4])
