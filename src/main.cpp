@@ -456,21 +456,29 @@ void scatterPlotStat( std::string path ) {
                     << std::setw(9) << "width"
                     << std::setw(9) << " intensity"
                     << std::endl;
+
         unsigned int count = 0;
-        for (unsigned int intensity = 0; intensity < 256; intensity++) {
-            if (!plot[intensity].size()) continue;
+        std::vector<unsigned int> bin;
+
+        for (unsigned int intensity = 1; intensity <= 250; intensity++) {
+
+            if (plot[intensity].size()) {
+                bin.insert(bin.end(), plot[intensity].begin(), plot[intensity].end());
+            }
+            if (!intensity%10) continue;
             count++;
-            std::sort(plot[intensity].begin(), plot[intensity].end());
-            auto len = (unsigned int) plot[intensity].size();
+            std::sort(bin.begin(), bin.end());
+            auto len = (unsigned int) bin.size();
             data_stream << std::setw(3) << count
-                        << std::setw(9) << log10(plot[intensity][0])
-                        << std::setw(9) << log10(plot[intensity][len/4])
-                        << std::setw(9) << log10(plot[intensity][len/2])
-                        << std::setw(9) << log10(plot[intensity][3*len/4])
-                        << std::setw(9) << log10(plot[intensity][len-1])
+                        << std::setw(9) << log10(bin[0])
+                        << std::setw(9) << log10(bin[len/4])
+                        << std::setw(9) << log10(bin[len/2])
+                        << std::setw(9) << log10(bin[3*len/4])
+                        << std::setw(9) << log10(bin[len-1])
                         << std::setw(9) << "0.3"
-                        << std::setw(9) << log(intensity)
+                        << std::setw(9) << log(intensity-5)
                         << std::endl;
+            bin.clear();
         }
         data_stream.close();
     }
